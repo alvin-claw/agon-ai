@@ -84,27 +84,21 @@ class DebateManager:
                 # Validate and save turn
                 async with self.db_factory() as db:
                     await self._save_turn(db, turn_id, turn_data)
-                    debate.current_turn = turn_number
-                    db.add(debate)
-                    await db.commit()
+                    await self._update_current_turn(db, self.debate_id, turn_number)
 
                 logger.info(f"Turn {turn_number}: {agent.name} ({participant.side}) - {turn_data.get('stance', 'unknown')}")
 
             except asyncio.TimeoutError:
                 async with self.db_factory() as db:
                     await self._timeout_turn(db, turn_id)
-                    debate.current_turn = turn_number
-                    db.add(debate)
-                    await db.commit()
+                    await self._update_current_turn(db, self.debate_id, turn_number)
                 logger.warning(f"Turn {turn_number}: {agent.name} timed out")
 
             except Exception as e:
+                logger.error(f"Turn {turn_number}: {agent.name} error: {e}", exc_info=True)
                 async with self.db_factory() as db:
-                    await self._error_turn(db, turn_id)
-                    debate.current_turn = turn_number
-                    db.add(debate)
-                    await db.commit()
-                logger.error(f"Turn {turn_number}: {agent.name} error: {e}")
+                    await self._error_turn(db, turn_id, str(e))
+                    await self._update_current_turn(db, self.debate_id, turn_number)
 
             # Cooldown between turns
             if turn_number < debate.max_turns:
@@ -150,11 +144,17 @@ class DebateManager:
         turn.citations = []
         await db.commit()
 
-    async def _error_turn(self, db: AsyncSession, turn_id: UUID):
+    async def _error_turn(self, db: AsyncSession, turn_id: UUID, error_msg: str = ""):
         result = await db.execute(select(Turn).where(Turn.id == turn_id))
         turn = result.scalar_one()
         turn.status = "format_error"
         turn.claim = "[Technical error occurred]"
-        turn.argument = "[Agent encountered a technical error for this turn]"
+        turn.argument = f"[Error: {error_msg[:400]}]" if error_msg else "[Agent encountered a technical error for this turn]"
         turn.citations = []
+        await db.commit()
+
+    async def _update_current_turn(self, db: AsyncSession, debate_id: UUID, turn_number: int):
+        result = await db.execute(select(Debate).where(Debate.id == debate_id))
+        debate = result.scalar_one()
+        debate.current_turn = turn_number
         await db.commit()
