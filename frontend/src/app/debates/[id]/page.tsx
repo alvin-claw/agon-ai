@@ -6,7 +6,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Debate, Turn, AnalysisResult } from "@/types";
 import { fetchApi } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { TypewriterText } from "@/components/TypewriterText";
+import { CooldownTimer } from "@/components/CooldownTimer";
 
 type ReactionCounts = Record<string, Record<string, number>>;
 
@@ -20,6 +22,27 @@ function getSessionId(): string {
   return sid;
 }
 
+function transformSentimentData(sentimentData: AnalysisResult["sentiment_data"]) {
+  // Group by turn_number, merging pro and con data
+  const turnMap = new Map<number, any>();
+
+  sentimentData.forEach((item) => {
+    if (!turnMap.has(item.turn_number)) {
+      turnMap.set(item.turn_number, { turn_number: item.turn_number });
+    }
+
+    const turn = turnMap.get(item.turn_number)!;
+    const prefix = item.side === "pro" ? "pro" : "con";
+
+    // Use aggression/confidence if available, otherwise fallback to null
+    turn[`${prefix}_aggression`] = item.aggression ?? null;
+    turn[`${prefix}_confidence`] = item.confidence ?? null;
+  });
+
+  // Convert to array and sort by turn_number
+  return Array.from(turnMap.values()).sort((a, b) => a.turn_number - b.turn_number);
+}
+
 export default function DebateArenaPage() {
   const { id } = useParams<{ id: string }>();
   const [debate, setDebate] = useState<Debate | null>(null);
@@ -31,6 +54,7 @@ export default function DebateArenaPage() {
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [generatingAnalysis, setGeneratingAnalysis] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const seenTurnIdsRef = useRef<Set<string>>(new Set());
 
   const loadReactions = useCallback(() => {
     fetchApi<ReactionCounts>(`/api/debates/${id}/reactions`).then(setReactions);
@@ -121,6 +145,14 @@ export default function DebateArenaPage() {
     }, 5000);
     return () => clearInterval(interval);
   }, [id, debateStatus]);
+
+  // Track seen turn IDs for typewriter animation
+  useEffect(() => {
+    // On initial load, mark all turns as already seen
+    if (turns.length > 0 && seenTurnIdsRef.current.size === 0) {
+      turns.forEach((turn) => seenTurnIdsRef.current.add(turn.id));
+    }
+  }, [turns]);
 
   // Auto-scroll to bottom when new turns arrive
   useEffect(() => {
@@ -225,32 +257,37 @@ export default function DebateArenaPage() {
 
       {/* Turns timeline */}
       <div className="space-y-4">
-        {turns.map((turn) => (
-          <TurnCard
-            key={turn.id}
-            turn={turn}
-            debateId={id}
-            agentName={
-              turn.agent_id === proParticipant?.agent_id
-                ? proParticipant.agent_name
-                : conParticipant?.agent_name ?? "Unknown"
-            }
-            side={
-              turn.agent_id === proParticipant?.agent_id ? "pro" : "con"
-            }
-            reactions={reactions[turn.id] ?? {}}
-            onReacted={loadReactions}
-          />
-        ))}
+        {turns.map((turn) => {
+          const isNew = !seenTurnIdsRef.current.has(turn.id);
+          if (isNew) {
+            seenTurnIdsRef.current.add(turn.id);
+          }
+          return (
+            <TurnCard
+              key={turn.id}
+              turn={turn}
+              debateId={id}
+              agentName={
+                turn.agent_id === proParticipant?.agent_id
+                  ? proParticipant.agent_name
+                  : conParticipant?.agent_name ?? "Unknown"
+              }
+              side={
+                turn.agent_id === proParticipant?.agent_id ? "pro" : "con"
+              }
+              reactions={reactions[turn.id] ?? {}}
+              onReacted={loadReactions}
+              isNew={isNew}
+            />
+          );
+        })}
 
         {/* Pending indicator */}
         {debate.status === "in_progress" && (
-          <div className="flex items-center gap-3 py-4 px-5 rounded-xl border border-card-border bg-card animate-pulse-border">
-            <div className="w-2 h-2 rounded-full bg-accent animate-pulse" />
-            <span className="text-sm text-muted">
-              Waiting for Turn {debate.current_turn + 1}...
-            </span>
-          </div>
+          <CooldownTimer
+            cooldownSeconds={(debate as any).turn_cooldown_seconds ?? 10}
+            nextTurnNumber={debate.current_turn + 1}
+          />
         )}
 
         {debate.status === "completed" && turns.length > 0 && (
@@ -280,19 +317,22 @@ export default function DebateArenaPage() {
             </div>
           ) : (
             <div className="space-y-6">
-              {/* Token Chart */}
+              {/* Sentiment Trend Chart */}
               <div className="rounded-xl border border-card-border bg-card p-6">
-                <h3 className="text-sm font-bold uppercase text-muted mb-4">Token Count by Turn</h3>
+                <h3 className="text-sm font-bold uppercase text-muted mb-4">Sentiment Trends</h3>
                 <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={analysis.sentiment_data}>
+                  <LineChart data={transformSentimentData(analysis.sentiment_data)}>
                     <XAxis
                       dataKey="turn_number"
                       stroke="#71717a"
                       tick={{ fill: "#71717a" }}
+                      label={{ value: "Turn Number", position: "insideBottom", offset: -5, fill: "#71717a" }}
                     />
                     <YAxis
+                      domain={[0, 1]}
                       stroke="#71717a"
                       tick={{ fill: "#71717a" }}
+                      label={{ value: "Score", angle: -90, position: "insideLeft", fill: "#71717a" }}
                     />
                     <Tooltip
                       contentStyle={{
@@ -301,14 +341,70 @@ export default function DebateArenaPage() {
                         borderRadius: "8px",
                       }}
                       labelStyle={{ color: "#fafafa" }}
+                      formatter={(value: number | undefined) => value?.toFixed(2) ?? "N/A"}
                     />
-                    <Bar dataKey="token_count">
-                      {analysis.sentiment_data.map((entry, idx) => (
-                        <Cell key={idx} fill={entry.side === "pro" ? "#22c55e" : "#ef4444"} />
-                      ))}
-                    </Bar>
-                  </BarChart>
+                    <Legend
+                      wrapperStyle={{ paddingTop: "20px" }}
+                      iconType="line"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="pro_aggression"
+                      stroke="#22c55e"
+                      strokeWidth={2}
+                      dot={{ r: 4 }}
+                      name="Pro Aggression"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="pro_confidence"
+                      stroke="#22c55e"
+                      strokeWidth={2}
+                      strokeDasharray="5 5"
+                      dot={{ r: 4 }}
+                      name="Pro Confidence"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="con_aggression"
+                      stroke="#ef4444"
+                      strokeWidth={2}
+                      dot={{ r: 4 }}
+                      name="Con Aggression"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="con_confidence"
+                      stroke="#ef4444"
+                      strokeWidth={2}
+                      strokeDasharray="5 5"
+                      dot={{ r: 4 }}
+                      name="Con Confidence"
+                    />
+                  </LineChart>
                 </ResponsiveContainer>
+              </div>
+
+              {/* Token Count Summary */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="rounded-xl border border-pro/30 bg-pro/5 p-4">
+                  <h3 className="text-xs font-bold uppercase text-pro mb-2">Pro Total Tokens</h3>
+                  <div className="text-2xl font-bold text-foreground">
+                    {analysis.sentiment_data
+                      .filter(d => d.side === "pro")
+                      .reduce((sum, d) => sum + (d.token_count || 0), 0)
+                      .toLocaleString()}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-con/30 bg-con/5 p-4">
+                  <h3 className="text-xs font-bold uppercase text-con mb-2">Con Total Tokens</h3>
+                  <div className="text-2xl font-bold text-foreground">
+                    {analysis.sentiment_data
+                      .filter(d => d.side === "con")
+                      .reduce((sum, d) => sum + (d.token_count || 0), 0)
+                      .toLocaleString()}
+                  </div>
+                </div>
               </div>
 
               {/* Citation Stats */}
@@ -379,6 +475,7 @@ function TurnCard({
   side,
   reactions,
   onReacted,
+  isNew = false,
 }: {
   turn: Turn;
   debateId: string;
@@ -386,7 +483,9 @@ function TurnCard({
   side: "pro" | "con";
   reactions: Record<string, number>;
   onReacted: () => void;
+  isNew?: boolean;
 }) {
+  const [citationsCollapsed, setCitationsCollapsed] = useState(true);
   const borderColor = side === "pro" ? "border-pro/40" : "border-con/40";
   const sideColor = side === "pro" ? "text-pro" : "text-con";
   const bgTint = side === "pro" ? "bg-pro/5" : "bg-con/5";
@@ -433,19 +532,40 @@ function TurnCard({
         <p className="text-sm text-red-400 italic">{turn.claim}</p>
       ) : (
         <>
-          <p className="font-semibold text-sm mb-2">{turn.claim}</p>
+          <p className="font-semibold text-sm mb-2">
+            {isNew ? <TypewriterText text={turn.claim ?? ""} /> : turn.claim}
+          </p>
           <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">
-            {turn.argument}
+            {isNew ? <TypewriterText text={turn.argument ?? ""} /> : turn.argument}
           </p>
 
           {turn.citations.length > 0 && (
-            <div className="mt-3 space-y-1">
-              {turn.citations.map((c, i) => (
-                <div key={i} className="text-xs text-muted border-l-2 border-card-border pl-3">
-                  <span className="font-medium">{c.title}</span>
-                  {c.quote && <span className="italic"> &mdash; &ldquo;{c.quote}&rdquo;</span>}
+            <div className="mt-3">
+              <button
+                onClick={() => setCitationsCollapsed(!citationsCollapsed)}
+                className="flex items-center gap-1.5 text-xs text-muted hover:text-foreground transition-colors"
+              >
+                <span className="transition-transform duration-200" style={{ transform: citationsCollapsed ? 'rotate(0deg)' : 'rotate(90deg)' }}>
+                  ▸
+                </span>
+                <span>{turn.citations.length} {turn.citations.length === 1 ? 'citation' : 'citations'}</span>
+              </button>
+              <div
+                className="overflow-hidden transition-all duration-300 ease-in-out"
+                style={{
+                  maxHeight: citationsCollapsed ? '0' : `${turn.citations.length * 60}px`,
+                  opacity: citationsCollapsed ? 0 : 1,
+                }}
+              >
+                <div className="mt-2 space-y-1">
+                  {turn.citations.map((c, i) => (
+                    <div key={i} className="text-xs text-muted border-l-2 border-card-border pl-3">
+                      <span className="font-medium">{c.title}</span>
+                      {c.quote && <span className="italic"> &mdash; &ldquo;{c.quote}&rdquo;</span>}
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
             </div>
           )}
 

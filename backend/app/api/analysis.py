@@ -8,6 +8,7 @@ from sqlalchemy.sql import func
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
+from app.agents.sentiment_analyzer import analyze_debate_sentiment
 from app.database import get_db
 from app.models.debate import Debate, DebateParticipant, Turn
 from app.models.reaction import AnalysisResult
@@ -64,15 +65,8 @@ async def generate_analysis(
     )
     turns_with_side = result.all()
 
-    # Calculate sentiment_data: array of turn metadata
-    sentiment_data = []
-    for turn, side in turns_with_side:
-        sentiment_data.append({
-            "side": side,
-            "turn_number": turn.turn_number,
-            "token_count": turn.token_count or 0,
-            "stance": turn.stance,
-        })
+    # Analyze sentiment using Claude API
+    sentiment_data = await analyze_debate_sentiment(turns_with_side)
 
     # Calculate citation_stats: citations per side, unique sources
     citation_stats: dict[str, dict] = defaultdict(lambda: {"total": 0, "unique_sources": set()})

@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
+import tiktoken
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -13,6 +14,17 @@ from app.config import settings
 from app.models.debate import Debate, DebateParticipant, Turn
 
 logger = logging.getLogger(__name__)
+
+# Cache tiktoken encoding
+_TIKTOKEN_ENCODING = None
+
+
+def _get_tiktoken_encoding():
+    """Get cached tiktoken encoding."""
+    global _TIKTOKEN_ENCODING
+    if _TIKTOKEN_ENCODING is None:
+        _TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
+    return _TIKTOKEN_ENCODING
 
 
 class DebateManager:
@@ -142,7 +154,26 @@ class DebateManager:
         turn = result.scalar_one()
         turn.stance = data.get("stance")
         turn.claim = data.get("claim")
-        turn.argument = data.get("argument")
+        argument = data.get("argument", "")
+        token_count = data.get("token_count", 0)
+
+        # Enforce 500 token limit - truncate if exceeded
+        if token_count > 500:
+            try:
+                encoding = _get_tiktoken_encoding()
+                tokens = encoding.encode(argument)
+                if len(tokens) > 500:
+                    truncated_tokens = tokens[:500]
+                    argument = encoding.decode(truncated_tokens)
+                    token_count = 500
+                    logger.warning(
+                        f"Turn {turn.turn_number} exceeded 500 token limit "
+                        f"({data.get('token_count')} tokens), truncated"
+                    )
+            except Exception as e:
+                logger.error(f"Token truncation failed: {e}, using original argument")
+
+        turn.argument = argument
         turn.citations = data.get("citations", [])
         rebuttal_target = data.get("rebuttal_target")
         if rebuttal_target:
@@ -152,7 +183,7 @@ class DebateManager:
                 turn.rebuttal_target_id = None
         else:
             turn.rebuttal_target_id = None
-        turn.token_count = data.get("token_count")
+        turn.token_count = token_count
         turn.status = "validated"
         turn.submitted_at = datetime.now(timezone.utc)
         turn.validated_at = datetime.now(timezone.utc)

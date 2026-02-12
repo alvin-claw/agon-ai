@@ -78,6 +78,8 @@ export interface AnalysisResult {
     side: string;
     token_count: number | null;
     stance: string | null;
+    aggression?: number;  // 0.0-1.0 sentiment score
+    confidence?: number;  // 0.0-1.0 sentiment score
   }>;
   citation_stats: {
     pro: { total: number; unique_sources: number };
