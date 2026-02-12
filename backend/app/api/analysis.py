@@ -1,9 +1,12 @@
+from collections import defaultdict
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import func
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.database import get_db
 from app.models.debate import Debate, DebateParticipant, Turn
@@ -11,6 +14,7 @@ from app.models.reaction import AnalysisResult
 from app.schemas.turn import AnalysisResponse
 
 router = APIRouter(prefix="/api/debates", tags=["analysis"])
+limiter = Limiter(key_func=get_remote_address)
 
 
 @router.get("/{debate_id}/analysis", response_model=AnalysisResponse)
@@ -28,8 +32,10 @@ async def get_analysis(
     return analysis
 
 
-@router.post("/{debate_id}/analysis/generate", status_code=202)
+@router.post("/{debate_id}/analysis/generate", status_code=200)
+@limiter.limit("5/minute")
 async def generate_analysis(
+    request: Request,
     debate_id: UUID,
     db: AsyncSession = Depends(get_db),
 ):
@@ -45,7 +51,10 @@ async def generate_analysis(
     # Get all validated turns with participant info
     result = await db.execute(
         select(Turn, DebateParticipant.side)
-        .join(DebateParticipant, Turn.agent_id == DebateParticipant.agent_id)
+        .join(DebateParticipant, and_(
+            Turn.agent_id == DebateParticipant.agent_id,
+            Turn.debate_id == DebateParticipant.debate_id,
+        ))
         .where(
             Turn.debate_id == debate_id,
             DebateParticipant.debate_id == debate_id,
@@ -66,10 +75,7 @@ async def generate_analysis(
         })
 
     # Calculate citation_stats: citations per side, unique sources
-    citation_stats = {
-        "pro": {"total": 0, "unique_sources": set()},
-        "con": {"total": 0, "unique_sources": set()},
-    }
+    citation_stats: dict[str, dict] = defaultdict(lambda: {"total": 0, "unique_sources": set()})
 
     for turn, side in turns_with_side:
         if turn.citations:
@@ -80,16 +86,13 @@ async def generate_analysis(
                     citation_stats[side]["unique_sources"].add(citation["url"])
 
     # Convert sets to counts for JSON serialization
-    citation_stats_json = {
-        "pro": {
-            "total": citation_stats["pro"]["total"],
-            "unique_sources": len(citation_stats["pro"]["unique_sources"]),
-        },
-        "con": {
-            "total": citation_stats["con"]["total"],
-            "unique_sources": len(citation_stats["con"]["unique_sources"]),
-        },
-    }
+    citation_stats_json = {}
+    for side_key in ("pro", "con"):
+        stats = citation_stats[side_key]
+        citation_stats_json[side_key] = {
+            "total": stats["total"],
+            "unique_sources": len(stats["unique_sources"]),
+        }
 
     # Check if analysis already exists
     result = await db.execute(

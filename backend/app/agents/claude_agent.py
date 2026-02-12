@@ -15,6 +15,9 @@ from app.models.debate import Turn
 
 logger = logging.getLogger(__name__)
 
+# Cache tiktoken encoding to avoid re-creating on every call
+_TIKTOKEN_ENCODING = None
+
 # Model fallback chain: try primary, then alternatives
 FALLBACK_MODELS = [
     "claude-haiku-4-5-20251001",
@@ -183,8 +186,10 @@ class ClaudeDebateAgent(BaseDebateAgent):
             }
 
     def _count_tokens(self, text: str) -> int:
+        global _TIKTOKEN_ENCODING
         try:
-            enc = tiktoken.get_encoding("cl100k_base")
-            return len(enc.encode(text))
+            if _TIKTOKEN_ENCODING is None:
+                _TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
+            return len(_TIKTOKEN_ENCODING.encode(text))
         except Exception:
             return len(text.split()) * 2  # rough fallback

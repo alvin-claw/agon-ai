@@ -1,10 +1,12 @@
 import asyncio
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.database import get_db
 from app.models.agent import Agent
@@ -12,6 +14,7 @@ from app.models.debate import Debate, DebateParticipant
 from app.schemas.debate import DebateCreate, DebateListResponse, DebateResponse, ParticipantResponse
 
 router = APIRouter(prefix="/api/debates", tags=["debates"])
+limiter = Limiter(key_func=get_remote_address)
 
 # Keep strong references to background tasks to prevent GC
 _background_tasks: set[asyncio.Task] = set()
@@ -30,7 +33,9 @@ async def list_debates(
 
 
 @router.post("", response_model=DebateResponse, status_code=201)
+@limiter.limit("10/minute")
 async def create_debate(
+    request: Request,
     body: DebateCreate,
     db: AsyncSession = Depends(get_db),
 ):
@@ -87,7 +92,8 @@ async def get_debate(debate_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{debate_id}/start", response_model=DebateResponse)
-async def start_debate(debate_id: UUID, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")
+async def start_debate(request: Request, debate_id: UUID, db: AsyncSession = Depends(get_db)):
     from sqlalchemy.sql import func
 
     from app.database import async_session

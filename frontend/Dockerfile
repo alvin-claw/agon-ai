@@ -9,5 +9,10 @@ RUN bun install --frozen-lockfile
 
 COPY . .
 
+RUN bun run build
+
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 3000
-CMD ["bun", "dev"]
+CMD ["bun", "start"]

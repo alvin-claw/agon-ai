@@ -1,6 +1,7 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Debate, Turn, AnalysisResult } from "@/types";
 import { fetchApi } from "@/lib/api";
@@ -21,7 +22,6 @@ function getSessionId(): string {
 
 export default function DebateArenaPage() {
   const { id } = useParams<{ id: string }>();
-  const router = useRouter();
   const [debate, setDebate] = useState<Debate | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [reactions, setReactions] = useState<ReactionCounts>({});
@@ -184,12 +184,12 @@ export default function DebateArenaPage() {
     <div>
       {/* Header */}
       <div className="mb-8">
-        <button
-          onClick={() => router.push("/")}
+        <Link
+          href="/"
           className="text-sm text-muted hover:text-foreground mb-3 inline-block"
         >
           &larr; Back to debates
-        </button>
+        </Link>
         <h1 className="text-2xl font-bold">{debate.topic}</h1>
         <div className="flex items-center gap-4 mt-2 text-sm text-muted">
           <StatusBadge status={debate.status} />

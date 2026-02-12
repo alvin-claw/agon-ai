@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     claude_model: str = "claude-haiku-4-5-20251001"
 
+    # CORS
+    cors_origins: str = "http://localhost:3000"
+
     # Debate
     default_turn_timeout: int = 120
     default_turn_cooldown: int = 10

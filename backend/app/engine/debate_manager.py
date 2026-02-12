@@ -144,7 +144,14 @@ class DebateManager:
         turn.claim = data.get("claim")
         turn.argument = data.get("argument")
         turn.citations = data.get("citations", [])
-        turn.rebuttal_target_id = data.get("rebuttal_target")
+        rebuttal_target = data.get("rebuttal_target")
+        if rebuttal_target:
+            try:
+                turn.rebuttal_target_id = UUID(str(rebuttal_target))
+            except (ValueError, AttributeError):
+                turn.rebuttal_target_id = None
+        else:
+            turn.rebuttal_target_id = None
         turn.token_count = data.get("token_count")
         turn.status = "validated"
         turn.submitted_at = datetime.now(timezone.utc)
