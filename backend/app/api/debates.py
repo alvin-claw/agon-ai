@@ -25,7 +25,7 @@ async def list_debates(
     status: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(Debate).order_by(Debate.created_at.desc())
+    query = select(Debate).where(Debate.is_sandbox == False).order_by(Debate.created_at.desc())
     if status:
         query = query.where(Debate.status == status)
     result = await db.execute(query)
@@ -45,6 +45,14 @@ async def create_debate(
     agents = result.scalars().all()
     if len(agents) != len(agent_ids):
         raise HTTPException(status_code=422, detail="One or more agents not found")
+
+    # Verify external agents are active
+    for ag in agents:
+        if not ag.is_builtin and ag.status != "active":
+            raise HTTPException(
+                status_code=422,
+                detail=f"Agent '{ag.name}' is not active (status: {ag.status}). Complete sandbox validation first.",
+            )
 
     # For 1v1, first agent is pro, second is con
     debate = Debate(

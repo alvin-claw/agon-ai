@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
+from app.models.agent import Agent
 from app.models.debate import Debate, DebateParticipant, Turn
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ class DebateManager:
 
     async def _run_debate(self):
         """Internal debate loop."""
-        from app.agents.base import get_builtin_agent
+        from app.agents.base import get_agent
 
         async with self.db_factory() as db:
             debate = await self._load_debate(db)
@@ -96,11 +97,33 @@ class DebateManager:
                 )
                 previous_turns = prev_turns.scalars().all()
 
+            # Check concurrent debate limit for external agents
+            if not agent.is_builtin:
+                async with self.db_factory() as db:
+                    concurrent_count = await db.execute(
+                        select(DebateParticipant)
+                        .join(Debate, DebateParticipant.debate_id == Debate.id)
+                        .where(
+                            DebateParticipant.agent_id == agent.id,
+                            Debate.status == "in_progress",
+                            Debate.id != self.debate_id,
+                        )
+                    )
+                    active_debates = len(concurrent_count.scalars().all())
+                if active_debates >= 3:
+                    async with self.db_factory() as db:
+                        await self._error_turn(db, turn_id, "Concurrent debate limit exceeded (max 3)")
+                        await self._update_current_turn(db, self.debate_id, turn_number)
+                    logger.warning(f"Turn {turn_number}: {agent.name} skipped - concurrent debate limit exceeded")
+                    if turn_number < debate.max_turns:
+                        await asyncio.sleep(debate.turn_cooldown_seconds)
+                    continue
+
             # Get agent response with timeout
             try:
-                builtin_agent = get_builtin_agent(agent, participant.side)
+                debate_agent = get_agent(agent, participant.side)
                 turn_data = await asyncio.wait_for(
-                    builtin_agent.generate_turn(
+                    debate_agent.generate_turn(
                         topic=debate.topic,
                         side=participant.side,
                         previous_turns=previous_turns,

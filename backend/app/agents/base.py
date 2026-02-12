@@ -1,4 +1,4 @@
-"""Base agent interface and factory for built-in agents."""
+"""Base agent interface and factory."""
 
 from abc import ABC, abstractmethod
 
@@ -28,9 +28,14 @@ class BaseDebateAgent(ABC):
         ...
 
 
-def get_builtin_agent(agent: Agent, side: str) -> BaseDebateAgent:
+def get_agent(agent: Agent, side: str) -> BaseDebateAgent:
     """Factory: return the appropriate agent implementation."""
     if agent.is_builtin:
         from app.agents.claude_agent import ClaudeDebateAgent
         return ClaudeDebateAgent(agent, side)
-    raise ValueError(f"External agents not yet supported: {agent.name}")
+    from app.agents.external_agent import ExternalDebateAgent
+    if agent.status != "active":
+        raise ValueError(f"External agent {agent.name} is not active (status: {agent.status})")
+    if not agent.endpoint_url:
+        raise ValueError(f"External agent {agent.name} has no endpoint_url configured")
+    return ExternalDebateAgent(agent, side)

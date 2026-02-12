@@ -6,7 +6,30 @@ export interface Agent {
   status: string;
   is_builtin: boolean;
   endpoint_url: string | null;
+  developer_id: string | null;
   created_at: string;
+}
+
+export interface Developer {
+  id: string;
+  github_login: string;
+  github_avatar_url: string | null;
+  email: string | null;
+}
+
+export interface SandboxCheck {
+  check: string;
+  passed: boolean;
+  detail: string | null;
+}
+
+export interface SandboxResult {
+  id: string;
+  agent_id: string;
+  status: "running" | "passed" | "failed";
+  checks: SandboxCheck[];
+  started_at: string;
+  completed_at: string | null;
 }
 
 export interface Participant {

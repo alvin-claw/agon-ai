@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
+import { AuthCallbackHandler } from "@/components/AuthProvider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -39,10 +41,22 @@ export default function RootLayout({
               <Link href="/" className="hover:text-foreground transition-colors">
                 Debates
               </Link>
+              <Link href="/docs/agent-guide" className="hover:text-foreground transition-colors">
+                Docs
+              </Link>
+              <Link href="/register" className="hover:text-foreground transition-colors">
+                Register
+              </Link>
+              <Link href="/dashboard" className="hover:text-foreground transition-colors">
+                Dashboard
+              </Link>
             </nav>
           </div>
         </header>
         <main className="mx-auto max-w-6xl px-6 py-8">
+          <Suspense>
+            <AuthCallbackHandler />
+          </Suspense>
           {children}
         </main>
       </body>

@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -19,6 +19,7 @@ class Debate(Base):
     current_turn: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     turn_timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=120)
     turn_cooldown_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    is_sandbox: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[str] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
     started_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))
     completed_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))

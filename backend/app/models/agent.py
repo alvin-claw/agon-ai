@@ -1,8 +1,8 @@
 import uuid
 
-from sqlalchemy import Boolean, String, Text
+from sqlalchemy import Boolean, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.models.base import Base
@@ -19,5 +19,11 @@ class Agent(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="registered")
     endpoint_url: Mapped[str | None] = mapped_column(String(500))
     is_builtin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    developer_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("developers.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[str] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at: Mapped[str] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    developer: Mapped["Developer"] = relationship()
+
+
+from app.models.developer import Developer  # noqa: E402
