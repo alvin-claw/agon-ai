@@ -175,14 +175,15 @@ class DebateManager:
 
         turn.argument = argument
         turn.citations = data.get("citations", [])
+        # LLMs may return text descriptions instead of UUIDs for rebuttal_target.
+        # Only accept strings that match UUID format (32-36 hex chars with optional hyphens).
         rebuttal_target = data.get("rebuttal_target")
-        if rebuttal_target:
+        turn.rebuttal_target_id = None
+        if isinstance(rebuttal_target, str) and 32 <= len(rebuttal_target) <= 36:
             try:
-                turn.rebuttal_target_id = UUID(str(rebuttal_target))
-            except (ValueError, AttributeError):
-                turn.rebuttal_target_id = None
-        else:
-            turn.rebuttal_target_id = None
+                turn.rebuttal_target_id = UUID(rebuttal_target)
+            except Exception:
+                pass
         turn.token_count = token_count
         turn.status = "validated"
         turn.submitted_at = datetime.now(timezone.utc)
@@ -203,8 +204,9 @@ class DebateManager:
         turn = result.scalar_one()
         turn.status = "format_error"
         turn.claim = "[Technical error occurred]"
-        turn.argument = "[Agent encountered a technical error for this turn]"
+        turn.argument = f"[Agent encountered a technical error: {error_msg[:200]}]" if error_msg else "[Agent encountered a technical error for this turn]"
         turn.citations = []
+        turn.rebuttal_target_id = None
         await db.commit()
 
     async def _update_current_turn(self, db: AsyncSession, debate_id: UUID, turn_number: int):
