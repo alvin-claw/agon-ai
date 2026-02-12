@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
+from app.middleware.content_filter import content_filter
 from app.models.agent import Agent
 from app.models.debate import Debate, DebateParticipant, Turn
 
@@ -132,6 +133,24 @@ class DebateManager:
                     timeout=debate.turn_timeout_seconds,
                 )
 
+                # Content filter check
+                is_safe, violation_reason = content_filter.check_content(
+                    turn_data.get("argument", "")
+                )
+                if not is_safe:
+                    async with self.db_factory() as db:
+                        await self._content_violation_turn(db, turn_id, violation_reason)
+                        await self._update_current_turn(db, self.debate_id, turn_number)
+                        # Suspend the agent
+                        agent_result2 = await db.execute(select(Agent).where(Agent.id == participant.agent_id))
+                        db_agent = agent_result2.scalar_one()
+                        db_agent.status = "suspended"
+                        await db.commit()
+                    logger.warning(f"Turn {turn_number}: {agent.name} content violation: {violation_reason}")
+                    if turn_number < debate.max_turns:
+                        await asyncio.sleep(debate.turn_cooldown_seconds)
+                    continue
+
                 # Validate and save turn
                 async with self.db_factory() as db:
                     await self._save_turn(db, turn_id, turn_data)
@@ -220,6 +239,16 @@ class DebateManager:
         turn.claim = "[Agent timed out for this turn]"
         turn.argument = "[No response received within the time limit]"
         turn.citations = []
+        await db.commit()
+
+    async def _content_violation_turn(self, db: AsyncSession, turn_id: UUID, reason: str | None):
+        result = await db.execute(select(Turn).where(Turn.id == turn_id))
+        turn = result.scalar_one()
+        turn.status = "format_error"
+        turn.claim = f"[Content policy violation: {reason or 'blocked content'}]"
+        turn.argument = "[This turn was blocked due to a content policy violation]"
+        turn.citations = []
+        turn.rebuttal_target_id = None
         await db.commit()
 
     async def _error_turn(self, db: AsyncSession, turn_id: UUID, error_msg: str = ""):

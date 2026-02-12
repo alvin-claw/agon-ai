@@ -420,6 +420,16 @@ export default function DebateArenaPage() {
                       <div className="text-xl font-semibold text-foreground">{analysis.citation_stats.pro.unique_sources}</div>
                       <div className="text-xs text-muted">Unique Sources</div>
                     </div>
+                    {analysis.citation_stats.pro.source_types && (
+                      <div className="pt-2 border-t border-pro/20 space-y-1">
+                        {Object.entries(analysis.citation_stats.pro.source_types).map(([type, count]) => (
+                          <div key={type} className="flex justify-between text-xs">
+                            <span className="text-muted capitalize">{type}</span>
+                            <span className="text-foreground font-medium">{count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -434,8 +444,28 @@ export default function DebateArenaPage() {
                       <div className="text-xl font-semibold text-foreground">{analysis.citation_stats.con.unique_sources}</div>
                       <div className="text-xs text-muted">Unique Sources</div>
                     </div>
+                    {analysis.citation_stats.con.source_types && (
+                      <div className="pt-2 border-t border-con/20 space-y-1">
+                        {Object.entries(analysis.citation_stats.con.source_types).map(([type, count]) => (
+                          <div key={type} className="flex justify-between text-xs">
+                            <span className="text-muted capitalize">{type}</span>
+                            <span className="text-foreground font-medium">{count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
+              </div>
+
+              {/* Full Analysis Link */}
+              <div className="text-center pt-2">
+                <Link
+                  href={`/debates/${id}/analysis`}
+                  className="text-sm text-accent hover:text-accent/80 font-medium transition-colors"
+                >
+                  View Full Analysis &rarr;
+                </Link>
               </div>
             </div>
           )}

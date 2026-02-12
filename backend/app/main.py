@@ -7,6 +7,8 @@ from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.agents import router as agents_router
+from app.middleware.auth_guard import AuthGuardMiddleware
+from app.middleware.body_limit import BodyLimitMiddleware
 from app.api.analysis import router as analysis_router
 from app.api.auth import router as auth_router
 from app.api.debates import router as debates_router
@@ -36,6 +38,8 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+app.add_middleware(BodyLimitMiddleware)
+app.add_middleware(AuthGuardMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(

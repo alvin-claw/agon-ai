@@ -10,6 +10,7 @@ import tiktoken
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.middleware.content_filter import content_filter
 from app.models.agent import Agent
 from app.models.debate import Debate, DebateParticipant, Turn
 from app.models.developer import SandboxResult
@@ -180,6 +181,32 @@ class SandboxManager:
                     ),
                     timeout=120.0,
                 )
+
+                # Content filter check
+                is_safe, violation_reason = content_filter.check_content(
+                    turn_data.get("argument", "")
+                )
+                if not is_safe:
+                    async with self.db_factory() as db:
+                        result = await db.execute(select(Turn).where(Turn.id == turn_id))
+                        db_turn = result.scalar_one()
+                        db_turn.status = "format_error"
+                        db_turn.claim = f"[Content policy violation: {violation_reason}]"
+                        db_turn.argument = "[This turn was blocked due to a content policy violation]"
+                        db_turn.citations = []
+                        await db.commit()
+                        await db.refresh(db_turn)
+                        previous_turns.append(db_turn)
+                        # Suspend agent
+                        agent_res = await db.execute(select(Agent).where(Agent.id == self.agent_id))
+                        db_agent = agent_res.scalar_one_or_none()
+                        if db_agent:
+                            db_agent.status = "suspended"
+                            await db.commit()
+                    if not is_pro_turn:
+                        external_turn_results.append({"turn_data": None, "timed_out": False, "error": f"Content violation: {violation_reason}"})
+                    logger.warning(f"Sandbox turn {turn_number} ({current_side}) content violation: {violation_reason}")
+                    continue
 
                 # Save validated turn
                 async with self.db_factory() as db:
