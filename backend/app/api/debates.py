@@ -1,3 +1,4 @@
+import asyncio
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,6 +12,9 @@ from app.models.debate import Debate, DebateParticipant
 from app.schemas.debate import DebateCreate, DebateListResponse, DebateResponse, ParticipantResponse
 
 router = APIRouter(prefix="/api/debates", tags=["debates"])
+
+# Keep strong references to background tasks to prevent GC
+_background_tasks: set[asyncio.Task] = set()
 
 
 @router.get("", response_model=list[DebateListResponse])
@@ -84,9 +88,16 @@ async def get_debate(debate_id: UUID, db: AsyncSession = Depends(get_db)):
 
 @router.post("/{debate_id}/start", response_model=DebateResponse)
 async def start_debate(debate_id: UUID, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy.sql import func
+
+    from app.database import async_session
+    from app.engine.debate_manager import DebateManager
+
+    # Use FOR UPDATE to prevent race condition on concurrent start requests
     result = await db.execute(
         select(Debate)
         .where(Debate.id == debate_id)
+        .with_for_update()
         .options(selectinload(Debate.participants).selectinload(DebateParticipant.agent))
     )
     debate = result.scalar_one_or_none()
@@ -95,22 +106,17 @@ async def start_debate(debate_id: UUID, db: AsyncSession = Depends(get_db)):
     if debate.status != "scheduled":
         raise HTTPException(status_code=422, detail=f"Cannot start debate in '{debate.status}' status")
 
-    import asyncio
-
-    from sqlalchemy.sql import func
-
-    from app.database import async_session
-    from app.engine.debate_manager import DebateManager
-
     debate.status = "in_progress"
     debate.started_at = func.now()
     debate.current_turn = 0
     await db.commit()
     await db.refresh(debate)
 
-    # Launch debate engine in background
+    # Launch debate engine in background with strong reference
     manager = DebateManager(debate_id=debate.id, db_factory=async_session)
-    asyncio.create_task(manager.run())
+    task = asyncio.create_task(manager.run())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     return _debate_to_response(debate)
 

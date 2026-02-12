@@ -52,7 +52,7 @@ class Turn(Base):
     stance: Mapped[str | None] = mapped_column(String(20))
     claim: Mapped[str | None] = mapped_column(Text)
     argument: Mapped[str | None] = mapped_column(Text)
-    citations: Mapped[dict | None] = mapped_column(JSONB, default=[])
+    citations: Mapped[list | None] = mapped_column(JSONB, default=list)
     rebuttal_target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("turns.id"))
     token_count: Mapped[int | None] = mapped_column(Integer)
     submitted_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True))

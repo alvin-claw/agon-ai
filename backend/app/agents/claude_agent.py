@@ -118,6 +118,18 @@ class ClaudeDebateAgent(BaseDebateAgent):
         for attempt in range(max_retries):
             try:
                 return await self.client.messages.create(**kwargs)
+            except (anthropic.APIConnectionError, anthropic.APITimeoutError) as e:
+                if attempt < max_retries - 1:
+                    base_wait = min(2 ** (attempt + 1), 30)
+                    jitter = random.uniform(0, base_wait * 0.5)
+                    wait = base_wait + jitter
+                    logger.warning(
+                        f"API network error on {kwargs.get('model')}: {e}, "
+                        f"retrying in {wait:.1f}s (attempt {attempt + 1}/{max_retries})"
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    raise
             except anthropic.APIStatusError as e:
                 if e.status_code in retryable_codes and attempt < max_retries - 1:
                     base_wait = min(2 ** (attempt + 1), 30)

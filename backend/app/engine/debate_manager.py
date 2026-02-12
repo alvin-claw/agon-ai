@@ -24,6 +24,22 @@ class DebateManager:
 
     async def run(self):
         """Run the full debate loop."""
+        try:
+            await self._run_debate()
+        except Exception as e:
+            logger.error(f"Debate {self.debate_id} failed: {e}", exc_info=True)
+            try:
+                async with self.db_factory() as db:
+                    result = await db.execute(select(Debate).where(Debate.id == self.debate_id))
+                    debate = result.scalar_one()
+                    debate.status = "failed"
+                    debate.completed_at = datetime.now(timezone.utc)
+                    await db.commit()
+            except Exception:
+                logger.error(f"Failed to mark debate {self.debate_id} as failed", exc_info=True)
+
+    async def _run_debate(self):
+        """Internal debate loop."""
         from app.agents.base import get_builtin_agent
 
         async with self.db_factory() as db:
@@ -149,7 +165,7 @@ class DebateManager:
         turn = result.scalar_one()
         turn.status = "format_error"
         turn.claim = "[Technical error occurred]"
-        turn.argument = f"[Error: {error_msg[:400]}]" if error_msg else "[Agent encountered a technical error for this turn]"
+        turn.argument = "[Agent encountered a technical error for this turn]"
         turn.citations = []
         await db.commit()
 

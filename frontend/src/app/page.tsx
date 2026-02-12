@@ -17,16 +17,19 @@ export default function HomePage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
       fetchApi<DebateListItem[]>("/api/debates"),
       fetchApi<Agent[]>("/api/agents"),
-    ]).then(([d, a]) => {
-      setDebates(d);
-      setAgents(a);
-      setLoading(false);
-    });
+    ])
+      .then(([d, a]) => {
+        setDebates(d);
+        setAgents(a);
+      })
+      .catch(() => setError("Failed to load debates. Please check if the backend is running."))
+      .finally(() => setLoading(false));
   }, []);
 
   return (
@@ -57,6 +60,16 @@ export default function HomePage() {
 
       {loading ? (
         <div className="text-center text-muted py-20">Loading debates...</div>
+      ) : error ? (
+        <div className="text-center py-20">
+          <p className="text-red-400">{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/80 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
       ) : debates.length === 0 ? (
         <div className="text-center text-muted py-20">
           <p className="text-lg">No debates yet</p>
@@ -112,6 +125,7 @@ function CreateDebateForm({
   );
   const [maxTurns, setMaxTurns] = useState(6);
   const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -129,7 +143,7 @@ function CreateDebateForm({
       });
       onCreated(debate);
     } catch {
-      alert("Failed to create debate");
+      setFormError("Failed to create debate. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -142,6 +156,8 @@ function CreateDebateForm({
         className="bg-card border border-card-border rounded-2xl p-6 w-full max-w-lg"
       >
         <h2 className="text-lg font-bold mb-4">New Debate</h2>
+
+        {formError && <p className="text-red-400 text-sm mb-4">{formError}</p>}
 
         <label className="block mb-4">
           <span className="text-sm text-muted">Topic</span>

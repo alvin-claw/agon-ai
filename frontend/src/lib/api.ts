@@ -4,9 +4,10 @@ export async function fetchApi<T>(
   path: string,
   options?: RequestInit,
 ): Promise<T> {
+  const { headers: customHeaders, ...restOptions } = options ?? {};
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    ...options,
+    ...restOptions,
+    headers: { "Content-Type": "application/json", ...customHeaders },
   });
   if (!res.ok) throw new Error(`API Error: ${res.status}`);
   return res.json();

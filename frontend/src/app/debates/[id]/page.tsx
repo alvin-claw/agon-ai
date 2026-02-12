@@ -26,6 +26,7 @@ export default function DebateArenaPage() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [reactions, setReactions] = useState<ReactionCounts>({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [generatingAnalysis, setGeneratingAnalysis] = useState(false);
@@ -46,18 +47,22 @@ export default function DebateArenaPage() {
   }, [id]);
 
   const loadData = useCallback(async () => {
-    const [d, t] = await Promise.all([
-      fetchApi<Debate>(`/api/debates/${id}`),
-      fetchApi<Turn[]>(`/api/debates/${id}/turns`),
-      fetchApi<ReactionCounts>(`/api/debates/${id}/reactions`).then(setReactions),
-    ]);
-    setDebate(d);
-    setTurns(t);
-    setLoading(false);
+    try {
+      const [d, t] = await Promise.all([
+        fetchApi<Debate>(`/api/debates/${id}`),
+        fetchApi<Turn[]>(`/api/debates/${id}/turns`),
+        fetchApi<ReactionCounts>(`/api/debates/${id}/reactions`).then(setReactions),
+      ]);
+      setDebate(d);
+      setTurns(t);
 
-    // Load analysis if debate is completed
-    if (d.status === "completed") {
-      loadAnalysis();
+      if (d.status === "completed") {
+        loadAnalysis();
+      }
+    } catch {
+      setError("Failed to load debate. Please check if the backend is running.");
+    } finally {
+      setLoading(false);
     }
   }, [id, loadAnalysis]);
 
@@ -65,9 +70,19 @@ export default function DebateArenaPage() {
     loadData();
   }, [loadData]);
 
+  // Track debate status separately to avoid realtime subscription churn
+  const [debateStatus, setDebateStatus] = useState<string | null>(null);
+
+  // Update debateStatus when debate changes
+  useEffect(() => {
+    if (debate && debate.status !== debateStatus) {
+      setDebateStatus(debate.status);
+    }
+  }, [debate, debateStatus]);
+
   // Supabase Realtime subscription for new turns
   useEffect(() => {
-    if (!debate || debate.status === "completed") return;
+    if (!debateStatus || debateStatus === "completed") return;
 
     const channel = supabase
       .channel(`debate-${id}`)
@@ -80,9 +95,11 @@ export default function DebateArenaPage() {
           filter: `debate_id=eq.${id}`,
         },
         () => {
-          // Reload turns on any change
-          fetchApi<Turn[]>(`/api/debates/${id}/turns`).then(setTurns);
-          fetchApi<Debate>(`/api/debates/${id}`).then(setDebate);
+          fetchApi<Turn[]>(`/api/debates/${id}/turns`).then(setTurns).catch(() => {});
+          fetchApi<Debate>(`/api/debates/${id}`).then((d) => {
+            setDebate(d);
+            setDebateStatus(d.status);
+          }).catch(() => {});
         }
       )
       .subscribe();
@@ -90,17 +107,20 @@ export default function DebateArenaPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [id, debate?.status]);
+  }, [id, debateStatus]);
 
-  // Poll as fallback for realtime (every 5s while in_progress)
+  // Poll as fallback (every 5s while in_progress)
   useEffect(() => {
-    if (!debate || debate.status !== "in_progress") return;
+    if (debateStatus !== "in_progress") return;
     const interval = setInterval(() => {
-      fetchApi<Turn[]>(`/api/debates/${id}/turns`).then(setTurns);
-      fetchApi<Debate>(`/api/debates/${id}`).then(setDebate);
+      fetchApi<Turn[]>(`/api/debates/${id}/turns`).then(setTurns).catch(() => {});
+      fetchApi<Debate>(`/api/debates/${id}`).then((d) => {
+        setDebate(d);
+        setDebateStatus(d.status);
+      }).catch(() => {});
     }, 5000);
     return () => clearInterval(interval);
-  }, [id, debate?.status]);
+  }, [id, debateStatus]);
 
   // Auto-scroll to bottom when new turns arrive
   useEffect(() => {
@@ -115,7 +135,7 @@ export default function DebateArenaPage() {
       });
       setDebate(d);
     } catch {
-      alert("Failed to start debate");
+      setError("Failed to start debate. Please try again.");
     } finally {
       setStarting(false);
     }
@@ -129,7 +149,7 @@ export default function DebateArenaPage() {
       });
       await loadAnalysis();
     } catch {
-      alert("Failed to generate analysis");
+      setError("Failed to generate analysis. Please try again.");
     } finally {
       setGeneratingAnalysis(false);
     }
@@ -137,6 +157,20 @@ export default function DebateArenaPage() {
 
   if (loading) {
     return <div className="text-center text-muted py-20">Loading debate...</div>;
+  }
+
+  if (error && !debate) {
+    return (
+      <div className="text-center py-20">
+        <p className="text-red-400">{error}</p>
+        <button
+          onClick={() => window.location.reload()}
+          className="mt-4 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/80 transition-colors"
+        >
+          Retry
+        </button>
+      </div>
+    );
   }
 
   if (!debate) {
@@ -389,7 +423,7 @@ function TurnCard({
       <div className="flex items-center gap-2 mb-3">
         <span className={`text-xs font-bold uppercase ${sideColor}`}>{side}</span>
         <span className="text-sm text-muted">{agentName}</span>
-        {turn.token_count && (
+        {turn.token_count != null && (
           <span className="text-xs text-muted font-mono">{turn.token_count} tok</span>
         )}
         <span className="text-xs text-muted ml-auto">Turn {turn.turn_number}</span>
