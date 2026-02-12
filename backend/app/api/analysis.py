@@ -18,6 +18,41 @@ router = APIRouter(prefix="/api/debates", tags=["analysis"])
 limiter = Limiter(key_func=get_remote_address)
 
 
+def classify_citation_url(url: str) -> str:
+    """Classify citation URL by source type based on domain patterns."""
+    url_lower = url.lower()
+
+    # Academic sources
+    academic_patterns = [
+        "scholar.google", "arxiv", "doi.org", "ncbi", "pubmed", "jstor",
+        "ssrn", "ieee", "springer", "nature.com", "science.org", "wiley",
+        "researchgate", ".edu", "academic"
+    ]
+    if any(pattern in url_lower for pattern in academic_patterns):
+        return "academic"
+
+    # News sources
+    news_patterns = [
+        "reuters", "bbc", "cnn", "nytimes", "washingtonpost", "theguardian",
+        "apnews", "bloomberg", "economist", "wsj"
+    ]
+    if any(pattern in url_lower for pattern in news_patterns):
+        return "news"
+
+    # Wiki sources
+    if "wikipedia" in url_lower or "wikimedia" in url_lower:
+        return "wiki"
+
+    # Government sources
+    gov_patterns = [
+        ".gov", ".go.kr", "europa.eu", "un.org", "who.int", "oecd.org"
+    ]
+    if any(pattern in url_lower for pattern in gov_patterns):
+        return "government"
+
+    return "other"
+
+
 @router.get("/{debate_id}/analysis", response_model=AnalysisResponse)
 async def get_analysis(
     debate_id: UUID,
@@ -68,8 +103,14 @@ async def generate_analysis(
     # Analyze sentiment using Claude API
     sentiment_data = await analyze_debate_sentiment(turns_with_side)
 
-    # Calculate citation_stats: citations per side, unique sources
-    citation_stats: dict[str, dict] = defaultdict(lambda: {"total": 0, "unique_sources": set()})
+    # Calculate citation_stats: citations per side, unique sources, source types
+    citation_stats: dict[str, dict] = defaultdict(
+        lambda: {
+            "total": 0,
+            "unique_sources": set(),
+            "source_types": {"academic": 0, "news": 0, "wiki": 0, "government": 0, "other": 0}
+        }
+    )
 
     for turn, side in turns_with_side:
         if turn.citations:
@@ -77,7 +118,10 @@ async def generate_analysis(
             citation_stats[side]["total"] += len(citations_list)
             for citation in citations_list:
                 if isinstance(citation, dict) and "url" in citation:
-                    citation_stats[side]["unique_sources"].add(citation["url"])
+                    url = citation["url"]
+                    citation_stats[side]["unique_sources"].add(url)
+                    source_type = classify_citation_url(url)
+                    citation_stats[side]["source_types"][source_type] += 1
 
     # Convert sets to counts for JSON serialization
     citation_stats_json = {}
@@ -86,6 +130,7 @@ async def generate_analysis(
         citation_stats_json[side_key] = {
             "total": stats["total"],
             "unique_sources": len(stats["unique_sources"]),
+            "source_types": stats["source_types"],
         }
 
     # Check if analysis already exists

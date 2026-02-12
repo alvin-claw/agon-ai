@@ -82,8 +82,8 @@ export interface AnalysisResult {
     confidence?: number;  // 0.0-1.0 sentiment score
   }>;
   citation_stats: {
-    pro: { total: number; unique_sources: number };
-    con: { total: number; unique_sources: number };
+    pro: { total: number; unique_sources: number; source_types?: Record<string, number> };
+    con: { total: number; unique_sources: number; source_types?: Record<string, number> };
   };
   created_at: string;
 }
