@@ -359,29 +359,45 @@ export default function DebateArenaPage() {
       )}
 
       {/* Turns timeline */}
-      <div className="space-y-4">
+      <div className="space-y-4 relative">
         {turns.map((turn) => {
           const isNew = !seenTurnIdsRef.current.has(turn.id);
           if (isNew) {
             seenTurnIdsRef.current.add(turn.id);
           }
           const participant = agentMap.get(turn.agent_id);
+          const rebuttalTargetTurn = turn.rebuttal_target_id
+            ? turns.find((t) => t.id === turn.rebuttal_target_id)
+            : null;
           return (
-            <TurnCard
-              key={turn.id}
-              turn={turn}
-              debateId={id}
-              agentName={participant?.agent_name ?? "Unknown"}
-              side={participant?.side ?? "pro"}
-              teamId={participant?.team_id ?? null}
-              isTeamDebate={isTeamDebate}
-              reactions={reactions[turn.id] ?? {}}
-              onReacted={loadReactions}
-              isNew={isNew}
-              factcheckResult={factcheckResults[turn.id] ?? null}
-              onFactcheck={handleFactcheck}
-              factcheckCooldown={factcheckCooldown}
-            />
+            <div key={turn.id} id={`turn-${turn.id}`}>
+              {/* Rebuttal connection indicator */}
+              {rebuttalTargetTurn && (
+                <div className="flex items-center gap-2 mb-1 ml-6">
+                  <svg width="20" height="20" viewBox="0 0 20 20" className="text-accent/60 shrink-0">
+                    <path d="M10 0 L10 12 L4 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span className="text-xs text-accent/60 font-medium">
+                    Replying to Turn {rebuttalTargetTurn.turn_number}
+                    <span className="text-muted font-normal"> &mdash; {rebuttalTargetTurn.claim?.slice(0, 50)}{(rebuttalTargetTurn.claim?.length ?? 0) > 50 ? "..." : ""}</span>
+                  </span>
+                </div>
+              )}
+              <TurnCard
+                turn={turn}
+                debateId={id}
+                agentName={participant?.agent_name ?? "Unknown"}
+                side={participant?.side ?? "pro"}
+                teamId={participant?.team_id ?? null}
+                isTeamDebate={isTeamDebate}
+                reactions={reactions[turn.id] ?? {}}
+                onReacted={loadReactions}
+                isNew={isNew}
+                factcheckResult={factcheckResults[turn.id] ?? null}
+                onFactcheck={handleFactcheck}
+                factcheckCooldown={factcheckCooldown}
+              />
+            </div>
           );
         })}
 

@@ -1,6 +1,7 @@
 """Debate Engine: manages debate lifecycle and turn orchestration."""
 
 import asyncio
+import hashlib
 import logging
 from datetime import datetime, timezone
 from uuid import UUID
@@ -14,6 +15,7 @@ from app.config import settings
 from app.middleware.content_filter import content_filter
 from app.models.agent import Agent
 from app.models.debate import Debate, DebateParticipant, Turn
+from app.models.factcheck import FactcheckRequest
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +175,9 @@ class DebateManager:
                     await self._save_turn(db, turn_id, turn_data)
                     await self._update_current_turn(db, self.debate_id, turn_number)
 
+                # Auto-factcheck: enqueue for background verification
+                await self._auto_factcheck(turn_id, turn_data)
+
                 logger.info(f"Turn {turn_number}: {agent.name} ({participant.side}) - {turn_data.get('stance', 'unknown')}")
 
                 # Publish turn_complete event for live mode
@@ -306,6 +311,40 @@ class DebateManager:
         turn.citations = []
         turn.rebuttal_target_id = None
         await db.commit()
+
+    async def _auto_factcheck(self, turn_id: UUID, turn_data: dict):
+        """Automatically enqueue a factcheck for every validated turn."""
+        from app.engine.factcheck_worker import factcheck_worker
+
+        try:
+            claim_text = (turn_data.get("claim") or "") + (turn_data.get("argument") or "")
+            claim_hash = hashlib.sha256(claim_text.encode()).hexdigest()[:64]
+
+            async with self.db_factory() as db:
+                # Dedup: skip if already requested for this claim in this debate
+                existing = await db.execute(
+                    select(FactcheckRequest).where(
+                        FactcheckRequest.debate_id == self.debate_id,
+                        FactcheckRequest.claim_hash == claim_hash,
+                    )
+                )
+                if existing.scalar_one_or_none():
+                    return
+
+                fc_request = FactcheckRequest(
+                    turn_id=turn_id,
+                    debate_id=self.debate_id,
+                    claim_hash=claim_hash,
+                    session_id="auto",
+                )
+                db.add(fc_request)
+                await db.commit()
+                await db.refresh(fc_request)
+
+            await factcheck_worker.enqueue(str(fc_request.id))
+            logger.info(f"Auto-factcheck enqueued for turn {turn_id}")
+        except Exception:
+            logger.exception(f"Failed to enqueue auto-factcheck for turn {turn_id}")
 
     async def _update_current_turn(self, db: AsyncSession, debate_id: UUID, turn_number: int):
         result = await db.execute(select(Debate).where(Debate.id == debate_id))
