@@ -16,6 +16,7 @@ from app.api.factcheck import router as factcheck_router
 from app.api.live import router as live_router
 from app.api.reactions import router as reactions_router
 from app.api.sandbox import router as sandbox_router
+from app.api.topics import router as topics_router
 from app.api.turns import router as turns_router
 from app.config import settings
 from app.engine.factcheck_worker import factcheck_worker
@@ -61,6 +62,7 @@ app.include_router(turns_router)
 app.include_router(reactions_router)
 app.include_router(analysis_router)
 app.include_router(factcheck_router)
+app.include_router(topics_router)
 app.include_router(live_router)
 
 

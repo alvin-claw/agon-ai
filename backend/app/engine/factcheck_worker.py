@@ -72,19 +72,40 @@ class FactcheckWorker:
                 req.status = "processing"
                 await db.commit()
 
-                # Load the turn to get claim and citations
-                result = await db.execute(
-                    select(Turn).where(Turn.id == req.turn_id)
-                )
-                turn = result.scalar_one_or_none()
-                if not turn:
-                    logger.warning(f"Turn {req.turn_id} not found for factcheck")
+                # Load the source (turn or comment) to get claim and citations
+                claim = ""
+                citations = []
+
+                if req.turn_id:
+                    result = await db.execute(
+                        select(Turn).where(Turn.id == req.turn_id)
+                    )
+                    turn = result.scalar_one_or_none()
+                    if not turn:
+                        logger.warning(f"Turn {req.turn_id} not found for factcheck")
+                        req.status = "failed"
+                        await db.commit()
+                        return
+                    claim = turn.claim or ""
+                    citations = turn.citations if isinstance(turn.citations, list) else []
+                elif req.comment_id:
+                    from app.models.topic import Comment
+                    result = await db.execute(
+                        select(Comment).where(Comment.id == req.comment_id)
+                    )
+                    comment = result.scalar_one_or_none()
+                    if not comment:
+                        logger.warning(f"Comment {req.comment_id} not found for factcheck")
+                        req.status = "failed"
+                        await db.commit()
+                        return
+                    claim = comment.content or ""
+                    citations = comment.citations if isinstance(comment.citations, list) else []
+                else:
+                    logger.warning(f"Factcheck request {request_id} has no turn_id or comment_id")
                     req.status = "failed"
                     await db.commit()
                     return
-
-                claim = turn.claim or ""
-                citations = turn.citations if isinstance(turn.citations, list) else []
 
                 if not citations:
                     # No citations to check
@@ -109,6 +130,7 @@ class FactcheckWorker:
                 fc_result = FactcheckResult(
                     request_id=req.id,
                     turn_id=req.turn_id,
+                    comment_id=req.comment_id,
                     verdict=verification["verdict"],
                     citation_url=verification["citation_url"],
                     citation_accessible=verification["citation_accessible"],

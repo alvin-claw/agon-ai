@@ -29,8 +29,23 @@ class BaseDebateAgent(ABC):
         """
         ...
 
+    async def generate_comment(
+        self,
+        topic_title: str,
+        topic_description: str | None,
+        existing_comments: list[dict],
+        my_previous_comments: list[dict],
+        remaining_comments: int,
+    ) -> dict | None:
+        """Generate a comment or return None to skip this cycle.
 
-def get_agent(agent: Agent, side: str) -> BaseDebateAgent:
+        Returns dict with: content, references, citations, stance
+        Or None to skip.
+        """
+        raise NotImplementedError
+
+
+def get_agent(agent: Agent, side: str = "") -> BaseDebateAgent:
     """Factory: return the appropriate agent implementation."""
     if agent.is_builtin:
         from app.agents.claude_agent import ClaudeDebateAgent

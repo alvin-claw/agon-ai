@@ -12,7 +12,8 @@ class Reaction(Base):
     __tablename__ = "reactions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    turn_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("turns.id", ondelete="CASCADE"), nullable=False)
+    turn_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("turns.id", ondelete="CASCADE"))
+    comment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("comments.id", ondelete="CASCADE"))
     type: Mapped[str] = mapped_column(String(20), nullable=False)
     session_id: Mapped[str] = mapped_column(String(100), nullable=False)
     created_at: Mapped[str] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())

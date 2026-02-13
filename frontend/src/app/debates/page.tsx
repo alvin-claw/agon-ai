@@ -2,18 +2,17 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { Agent, DebateListItem } from "@/types";
+import type { Agent, TopicListItem } from "@/types";
 import { fetchApi } from "@/lib/api";
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   scheduled: { label: "Scheduled", color: "text-yellow-400" },
-  in_progress: { label: "Live", color: "text-green-400" },
-  completed: { label: "Completed", color: "text-muted" },
-  cancelled: { label: "Cancelled", color: "text-red-400" },
+  open: { label: "Active", color: "text-green-400" },
+  closed: { label: "Closed", color: "text-muted" },
 };
 
-export default function DebatesPage() {
-  const [debates, setDebates] = useState<DebateListItem[]>([]);
+export default function TopicsPage() {
+  const [topics, setTopics] = useState<TopicListItem[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -21,14 +20,14 @@ export default function DebatesPage() {
 
   useEffect(() => {
     Promise.all([
-      fetchApi<DebateListItem[]>("/api/debates"),
+      fetchApi<TopicListItem[]>("/api/topics"),
       fetchApi<Agent[]>("/api/agents"),
     ])
-      .then(([d, a]) => {
-        setDebates(d);
+      .then(([t, a]) => {
+        setTopics(t);
         setAgents(a);
       })
-      .catch(() => setError("Failed to load debates. Please check if the backend is running."))
+      .catch(() => setError("Failed to load topics. Please check if the backend is running."))
       .finally(() => setLoading(false));
   }, []);
 
@@ -36,30 +35,30 @@ export default function DebatesPage() {
     <div>
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold">Debates</h1>
-          <p className="text-muted text-sm mt-1">AI agents debating topics autonomously</p>
+          <h1 className="text-2xl font-bold">Discussions</h1>
+          <p className="text-muted text-sm mt-1">AI agents discussing topics autonomously</p>
         </div>
         <button
           onClick={() => setShowForm(true)}
           className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/80 transition-colors"
         >
-          + New Debate
+          + New Topic
         </button>
       </div>
 
       {showForm && (
-        <CreateDebateForm
+        <CreateTopicForm
           agents={agents}
           onClose={() => setShowForm(false)}
-          onCreated={(d) => {
-            setDebates([d, ...debates]);
+          onCreated={(t) => {
+            setTopics([t, ...topics]);
             setShowForm(false);
           }}
         />
       )}
 
       {loading ? (
-        <div className="text-center text-muted py-20">Loading debates...</div>
+        <div className="text-center text-muted py-20">Loading topics...</div>
       ) : error ? (
         <div className="text-center py-20">
           <p className="text-red-400">{error}</p>
@@ -70,39 +69,42 @@ export default function DebatesPage() {
             Retry
           </button>
         </div>
-      ) : debates.length === 0 ? (
+      ) : topics.length === 0 ? (
         <div className="text-center text-muted py-20">
-          <p className="text-lg">No debates yet</p>
+          <p className="text-lg">No discussions yet</p>
           <p className="text-sm mt-2">Create one to get started</p>
         </div>
       ) : (
         <div className="grid gap-4">
-          {debates.map((debate) => {
-            const s = STATUS_LABELS[debate.status] || { label: debate.status, color: "text-muted" };
+          {topics.map((topic) => {
+            const s = STATUS_LABELS[topic.status] || { label: topic.status, color: "text-muted" };
+            const timeInfo = topic.status === "open" && topic.closes_at
+              ? formatTimeRemaining(topic.closes_at)
+              : null;
             return (
               <Link
-                key={debate.id}
-                href={`/debates/${debate.id}`}
+                key={topic.id}
+                href={`/debates/${topic.id}`}
                 className="block rounded-xl border border-card-border bg-card p-5 hover:border-accent/50 transition-colors"
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h2 className="font-semibold text-lg truncate">{debate.topic}</h2>
-                      {debate.mode === "live" && (
-                        <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
-                          LIVE
-                        </span>
-                      )}
-                    </div>
+                    <h2 className="font-semibold text-lg truncate">{topic.title}</h2>
+                    {topic.description && (
+                      <p className="text-sm text-muted mt-1 truncate">{topic.description}</p>
+                    )}
                     <div className="flex items-center gap-3 mt-2 text-sm text-muted">
-                      <span className="uppercase text-xs font-mono">{debate.format}</span>
-                      <span>Turn {debate.current_turn}/{debate.max_turns}</span>
-                      <span>{new Date(debate.created_at).toLocaleDateString("ko-KR")}</span>
+                      <span>{topic.participant_count} agents</span>
+                      <span>{topic.comment_count} comments</span>
+                      <span>{topic.duration_minutes}min</span>
+                      {timeInfo && (
+                        <span className="text-accent font-mono text-xs">{timeInfo}</span>
+                      )}
+                      <span>{new Date(topic.created_at).toLocaleDateString("ko-KR")}</span>
                     </div>
                   </div>
-                  <span className={`text-sm font-medium ${s.color}`}>
-                    {debate.status === "in_progress" && (
+                  <span className={`text-sm font-medium ${s.color} shrink-0 ml-4`}>
+                    {topic.status === "open" && (
                       <span className="inline-block w-2 h-2 rounded-full bg-green-400 mr-1.5 animate-pulse" />
                     )}
                     {s.label}
@@ -117,74 +119,60 @@ export default function DebatesPage() {
   );
 }
 
-const FORMAT_OPTIONS = [
-  { value: "1v1", label: "1v1", agentCount: 2 },
-  { value: "2v2", label: "2v2", agentCount: 4 },
-  { value: "3v3", label: "3v3", agentCount: 6 },
-] as const;
+function formatTimeRemaining(closesAt: string): string | null {
+  const diff = new Date(closesAt).getTime() - Date.now();
+  if (diff <= 0) return "Closing...";
+  const mins = Math.floor(diff / 60000);
+  const secs = Math.floor((diff % 60000) / 1000);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
 
-const DEFAULT_TURNS: Record<string, number> = { "1v1": 10, "2v2": 8, "3v3": 6 };
-
-function CreateDebateForm({
+function CreateTopicForm({
   agents,
   onClose,
   onCreated,
 }: {
   agents: Agent[];
   onClose: () => void;
-  onCreated: (d: DebateListItem) => void;
+  onCreated: (t: TopicListItem) => void;
 }) {
-  const [topic, setTopic] = useState("");
-  const [format, setFormat] = useState<"1v1" | "2v2" | "3v3">("1v1");
-  const [agentIds, setAgentIds] = useState<string[]>(
-    agents.length >= 2 ? [agents[0].id, agents[1].id] : ["", ""]
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [durationMinutes, setDurationMinutes] = useState(60);
+  const [maxComments, setMaxComments] = useState(10);
+  const [selectedAgents, setSelectedAgents] = useState<string[]>(
+    agents.length >= 2 ? [agents[0].id, agents[1].id] : []
   );
-  const [mode, setMode] = useState<"async" | "live">("async");
-  const [maxTurns, setMaxTurns] = useState(DEFAULT_TURNS["1v1"]);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const selectedFormat = FORMAT_OPTIONS.find((f) => f.value === format)!;
-  const proCount = selectedFormat.agentCount / 2;
-  const conCount = selectedFormat.agentCount / 2;
-
-  const handleFormatChange = (newFormat: "1v1" | "2v2" | "3v3") => {
-    setFormat(newFormat);
-    setMaxTurns(DEFAULT_TURNS[newFormat]);
-    const needed = FORMAT_OPTIONS.find((f) => f.value === newFormat)!.agentCount;
-    const newIds: string[] = [];
-    for (let i = 0; i < needed; i++) {
-      newIds.push(agents[i % agents.length]?.id ?? "");
-    }
-    setAgentIds(newIds);
-  };
-
-  const updateAgentId = (index: number, value: string) => {
-    setAgentIds((prev) => {
-      const next = [...prev];
-      next[index] = value;
-      return next;
-    });
+  const toggleAgent = (agentId: string) => {
+    setSelectedAgents((prev) =>
+      prev.includes(agentId)
+        ? prev.filter((id) => id !== agentId)
+        : [...prev, agentId]
+    );
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!topic.trim() || agentIds.some((id) => !id)) return;
+    if (!title.trim() || selectedAgents.length < 2) return;
     setSubmitting(true);
+    setFormError(null);
     try {
-      const debate = await fetchApi<DebateListItem>("/api/debates", {
+      const topic = await fetchApi<TopicListItem>("/api/topics", {
         method: "POST",
         body: JSON.stringify({
-          topic: topic.trim(),
-          format,
-          mode,
-          max_turns: maxTurns,
-          agent_ids: agentIds,
+          title: title.trim(),
+          description: description.trim() || null,
+          agent_ids: selectedAgents,
+          duration_minutes: durationMinutes,
+          max_comments_per_agent: maxComments,
         }),
       });
-      onCreated(debate);
+      onCreated(topic);
     } catch {
-      setFormError("Failed to create debate. Please try again.");
+      setFormError("Failed to create topic. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -195,7 +183,7 @@ function CreateDebateForm({
       className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
-      aria-label="New Debate"
+      aria-label="New Topic"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
     >
@@ -204,113 +192,82 @@ function CreateDebateForm({
         className="bg-card border border-card-border rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-lg font-bold mb-4">New Debate</h2>
+        <h2 className="text-lg font-bold mb-4">New Discussion</h2>
 
         {formError && <p className="text-red-400 text-sm mb-4">{formError}</p>}
 
         <label className="block mb-4">
-          <span className="text-sm text-muted">Topic</span>
+          <span className="text-sm text-muted">Topic Title</span>
           <input
             type="text"
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-            placeholder="e.g. AI 개발에 대한 규제가 필요한가?"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="e.g. 기본소득제는 도입되어야 하는가?"
             className="mt-1 w-full rounded-lg border border-card-border bg-background px-3 py-2 text-sm focus:outline-none focus:border-accent"
           />
         </label>
 
-        {/* Format selector */}
-        <div className="mb-4">
-          <span className="text-sm text-muted block mb-2">Format</span>
-          <div className="flex gap-2">
-            {FORMAT_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => handleFormatChange(opt.value)}
-                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-                  format === opt.value
-                    ? "border-accent bg-accent/10 text-accent"
-                    : "border-card-border bg-background text-muted hover:border-accent/50"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Mode selector */}
-        <div className="mb-4">
-          <span className="text-sm text-muted block mb-2">Mode</span>
-          <div className="flex gap-2">
-            {(["async", "live"] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMode(m)}
-                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-                  mode === m
-                    ? "border-accent bg-accent/10 text-accent"
-                    : "border-card-border bg-background text-muted hover:border-accent/50"
-                }`}
-              >
-                {m === "async" ? "Async" : "Live"}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Dynamic agent selection */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <div className="space-y-2">
-            <span className="text-sm text-pro font-medium">
-              {format === "1v1" ? "Pro Agent" : "Team A (Pro)"}
-            </span>
-            {Array.from({ length: proCount }).map((_, i) => (
-              <select
-                key={`pro-${i}`}
-                value={agentIds[i] ?? ""}
-                onChange={(e) => updateAgentId(i, e.target.value)}
-                className="w-full rounded-lg border border-card-border bg-background px-3 py-2 text-sm focus:outline-none focus:border-accent"
-              >
-                {agents.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
-            ))}
-          </div>
-          <div className="space-y-2">
-            <span className="text-sm text-con font-medium">
-              {format === "1v1" ? "Con Agent" : "Team B (Con)"}
-            </span>
-            {Array.from({ length: conCount }).map((_, i) => (
-              <select
-                key={`con-${i}`}
-                value={agentIds[proCount + i] ?? ""}
-                onChange={(e) => updateAgentId(proCount + i, e.target.value)}
-                className="w-full rounded-lg border border-card-border bg-background px-3 py-2 text-sm focus:outline-none focus:border-accent"
-              >
-                {agents.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
-            ))}
-          </div>
-        </div>
-
-        <label className="block mb-6">
-          <span className="text-sm text-muted">Max Turns</span>
-          <input
-            type="number"
-            min={2}
-            max={20}
-            step={2}
-            value={maxTurns}
-            onChange={(e) => setMaxTurns(Number(e.target.value))}
-            className="mt-1 w-full rounded-lg border border-card-border bg-background px-3 py-2 text-sm focus:outline-none focus:border-accent"
+        <label className="block mb-4">
+          <span className="text-sm text-muted">Description (optional)</span>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Provide context for the discussion..."
+            rows={3}
+            className="mt-1 w-full rounded-lg border border-card-border bg-background px-3 py-2 text-sm focus:outline-none focus:border-accent resize-none"
           />
         </label>
+
+        {/* Agent selection */}
+        <div className="mb-4">
+          <span className="text-sm text-muted block mb-2">Select Agents (min 2)</span>
+          <div className="space-y-2">
+            {agents.map((agent) => (
+              <label
+                key={agent.id}
+                className={`flex items-center gap-3 rounded-lg border px-3 py-2 cursor-pointer transition-colors ${
+                  selectedAgents.includes(agent.id)
+                    ? "border-accent bg-accent/10"
+                    : "border-card-border bg-background hover:border-accent/50"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedAgents.includes(agent.id)}
+                  onChange={() => toggleAgent(agent.id)}
+                  className="accent-accent"
+                />
+                <span className="text-sm font-medium">{agent.name}</span>
+                <span className="text-xs text-muted ml-auto">{agent.model_name}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          <label className="block">
+            <span className="text-sm text-muted">Duration (minutes)</span>
+            <input
+              type="number"
+              min={1}
+              max={1440}
+              value={durationMinutes}
+              onChange={(e) => setDurationMinutes(Number(e.target.value))}
+              className="mt-1 w-full rounded-lg border border-card-border bg-background px-3 py-2 text-sm focus:outline-none focus:border-accent"
+            />
+          </label>
+          <label className="block">
+            <span className="text-sm text-muted">Max Comments / Agent</span>
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={maxComments}
+              onChange={(e) => setMaxComments(Number(e.target.value))}
+              className="mt-1 w-full rounded-lg border border-card-border bg-background px-3 py-2 text-sm focus:outline-none focus:border-accent"
+            />
+          </label>
+        </div>
 
         <div className="flex justify-end gap-3">
           <button
@@ -322,7 +279,7 @@ function CreateDebateForm({
           </button>
           <button
             type="submit"
-            disabled={submitting || !topic.trim()}
+            disabled={submitting || !title.trim() || selectedAgents.length < 2}
             className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/80 transition-colors disabled:opacity-50"
           >
             {submitting ? "Creating..." : "Create"}

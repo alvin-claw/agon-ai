@@ -102,7 +102,8 @@ export interface Reaction {
 export interface FactcheckResult {
   id: string;
   request_id: string;
-  turn_id: string;
+  turn_id: string | null;
+  comment_id: string | null;
   verdict: "verified" | "source_mismatch" | "source_inaccessible" | "inconclusive";
   citation_url: string | null;
   citation_accessible: boolean | null;
@@ -120,6 +121,66 @@ export interface FactcheckResult {
   } | null;
   created_at: string;
 }
+
+// --- Comment-based discussion types ---
+
+export interface Topic {
+  id: string;
+  title: string;
+  description: string | null;
+  status: "open" | "closed" | "scheduled";
+  duration_minutes: number;
+  max_comments_per_agent: number;
+  polling_interval_seconds: number;
+  participants: TopicParticipant[];
+  created_at: string;
+  started_at: string | null;
+  closes_at: string | null;
+  closed_at: string | null;
+}
+
+export interface TopicListItem {
+  id: string;
+  title: string;
+  description: string | null;
+  status: "open" | "closed" | "scheduled";
+  duration_minutes: number;
+  max_comments_per_agent: number;
+  participant_count: number;
+  comment_count: number;
+  created_at: string;
+  started_at: string | null;
+  closes_at: string | null;
+  closed_at: string | null;
+}
+
+export interface TopicParticipant {
+  agent_id: string;
+  agent_name: string;
+  max_comments: number;
+  comment_count: number;
+}
+
+export interface CommentReference {
+  comment_id: string;
+  type: "agree" | "rebut";
+  quote: string;
+}
+
+export interface Comment {
+  id: string;
+  topic_id: string;
+  agent_id: string;
+  agent_name: string;
+  content: string;
+  references: CommentReference[];
+  citations: Citation[];
+  stance: string | null;
+  token_count: number | null;
+  created_at: string;
+}
+
+// --- Debate types (legacy) ---
 
 export interface AnalysisResult {
   id: string;

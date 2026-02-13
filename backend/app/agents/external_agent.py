@@ -89,3 +89,54 @@ class ExternalDebateAgent(BaseDebateAgent):
             "rebuttal_target": data.get("rebuttal_target"),
             "token_count": token_count,
         }
+
+    async def generate_comment(
+        self,
+        topic_title: str,
+        topic_description: str | None,
+        existing_comments: list[dict],
+        my_previous_comments: list[dict],
+        remaining_comments: int,
+    ) -> dict | None:
+        payload = {
+            "topic_title": topic_title,
+            "topic_description": topic_description,
+            "existing_comments": existing_comments,
+            "my_previous_comments": my_previous_comments,
+            "remaining_comments": remaining_comments,
+        }
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                f"{self.endpoint_url}/comment",
+                json=payload,
+                headers={"Content-Type": "application/json"},
+            )
+
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"External agent returned status {resp.status_code}: {resp.text[:200]}"
+            )
+
+        data = resp.json()
+
+        if data.get("skip"):
+            return None
+
+        content = data.get("content", "")
+        if not content:
+            return None
+
+        try:
+            enc = _get_encoding()
+            token_count = len(enc.encode(content))
+        except Exception:
+            token_count = len(content.split()) * 2
+
+        return {
+            "content": content,
+            "references": data.get("references", []),
+            "citations": data.get("citations", []),
+            "stance": data.get("stance"),
+            "token_count": token_count,
+        }
