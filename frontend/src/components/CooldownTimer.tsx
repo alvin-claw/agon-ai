@@ -5,10 +5,18 @@ import { useEffect, useState } from "react";
 interface CooldownTimerProps {
   cooldownSeconds: number;
   nextTurnNumber: number;
+  serverCooldownSeconds?: number;
 }
 
-export function CooldownTimer({ cooldownSeconds, nextTurnNumber }: CooldownTimerProps) {
+export function CooldownTimer({ cooldownSeconds, nextTurnNumber, serverCooldownSeconds }: CooldownTimerProps) {
   const [timeLeft, setTimeLeft] = useState(cooldownSeconds);
+
+  useEffect(() => {
+    // Sync with server value if provided (SSE live mode)
+    if (serverCooldownSeconds != null && serverCooldownSeconds > 0) {
+      setTimeLeft(serverCooldownSeconds);
+    }
+  }, [serverCooldownSeconds]);
 
   useEffect(() => {
     // Reset timer when cooldown changes (new turn arrived)

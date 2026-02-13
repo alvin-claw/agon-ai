@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Debate, Turn, AnalysisResult } from "@/types";
+import type { Debate, Turn, AnalysisResult, FactcheckResult } from "@/types";
 import { fetchApi } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { TypewriterText } from "@/components/TypewriterText";
 import { CooldownTimer } from "@/components/CooldownTimer";
+import { FactcheckBadge } from "@/components/FactcheckBadge";
+import { useLiveDebate } from "@/hooks/useLiveDebate";
 
 type ReactionCounts = Record<string, Record<string, number>>;
 
@@ -53,11 +55,42 @@ export default function DebateArenaPage() {
   const [starting, setStarting] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [generatingAnalysis, setGeneratingAnalysis] = useState(false);
+  const [factcheckResults, setFactcheckResults] = useState<Record<string, FactcheckResult>>({});
+  const [factcheckCooldown, setFactcheckCooldown] = useState<number>(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const seenTurnIdsRef = useRef<Set<string>>(new Set());
 
+  const isLiveMode = debate?.mode === "live";
+  const { isLive, viewerCount, cooldownSeconds: serverCooldown, latestTurn } = useLiveDebate(id, isLiveMode && debate?.status === "in_progress");
+
+  // Process live turn events
+  useEffect(() => {
+    if (latestTurn && isLiveMode) {
+      setTurns((prev) => {
+        const exists = prev.some((t) => t.id === latestTurn.id);
+        if (exists) {
+          return prev.map((t) => (t.id === latestTurn.id ? latestTurn : t));
+        }
+        return [...prev, latestTurn];
+      });
+    }
+  }, [latestTurn, isLiveMode]);
+
   const loadReactions = useCallback(() => {
     fetchApi<ReactionCounts>(`/api/debates/${id}/reactions`).then(setReactions);
+  }, [id]);
+
+  const loadFactchecks = useCallback(async () => {
+    try {
+      const results = await fetchApi<FactcheckResult[]>(`/api/debates/${id}/factchecks`);
+      const map: Record<string, FactcheckResult> = {};
+      for (const r of results) {
+        map[r.turn_id] = r;
+      }
+      setFactcheckResults(map);
+    } catch {
+      // No factchecks yet
+    }
   }, [id]);
 
   const loadAnalysis = useCallback(async () => {
@@ -76,6 +109,7 @@ export default function DebateArenaPage() {
         fetchApi<Debate>(`/api/debates/${id}`),
         fetchApi<Turn[]>(`/api/debates/${id}/turns`),
         fetchApi<ReactionCounts>(`/api/debates/${id}/reactions`).then(setReactions),
+        loadFactchecks(),
       ]);
       setDebate(d);
       setTurns(t);
@@ -88,7 +122,7 @@ export default function DebateArenaPage() {
     } finally {
       setLoading(false);
     }
-  }, [id, loadAnalysis]);
+  }, [id, loadAnalysis, loadFactchecks]);
 
   useEffect(() => {
     loadData();
@@ -133,6 +167,29 @@ export default function DebateArenaPage() {
     };
   }, [id, debateStatus]);
 
+  // Supabase Realtime subscription for factcheck results
+  useEffect(() => {
+    const channel = supabase
+      .channel(`factcheck-${id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "factcheck_results",
+        },
+        (payload) => {
+          const result = payload.new as FactcheckResult;
+          setFactcheckResults((prev) => ({ ...prev, [result.turn_id]: result }));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [id]);
+
   // Poll as fallback (every 5s while in_progress)
   useEffect(() => {
     if (debateStatus !== "in_progress") return;
@@ -158,6 +215,18 @@ export default function DebateArenaPage() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [turns.length]);
+
+  const handleFactcheck = async (turnId: string) => {
+    try {
+      await fetchApi(`/api/debates/${id}/turns/${turnId}/factcheck`, {
+        method: "POST",
+        body: JSON.stringify({ session_id: getSessionId() }),
+      });
+      setFactcheckCooldown(Date.now() + 60000);
+    } catch {
+      // Rate limited or error
+    }
+  };
 
   const handleStart = async () => {
     setStarting(true);
@@ -209,15 +278,17 @@ export default function DebateArenaPage() {
     return <div className="text-center text-muted py-20">Debate not found</div>;
   }
 
-  const proParticipant = debate.participants.find((p) => p.side === "pro");
-  const conParticipant = debate.participants.find((p) => p.side === "con");
+  const proParticipants = debate.participants.filter((p) => p.side === "pro");
+  const conParticipants = debate.participants.filter((p) => p.side === "con");
+  const isTeamDebate = debate.format !== "1v1";
+  const agentMap = new Map(debate.participants.map((p) => [p.agent_id, p]));
 
   return (
     <div>
       {/* Header */}
       <div className="mb-8">
         <Link
-          href="/"
+          href="/debates"
           className="text-sm text-muted hover:text-foreground mb-3 inline-block"
         >
           &larr; Back to debates
@@ -225,22 +296,54 @@ export default function DebateArenaPage() {
         <h1 className="text-2xl font-bold">{debate.topic}</h1>
         <div className="flex items-center gap-4 mt-2 text-sm text-muted">
           <StatusBadge status={debate.status} />
+          {isLiveMode && isLive && (
+            <span className="inline-flex items-center gap-1.5 text-xs font-bold text-red-400 bg-red-400/10 px-2 py-0.5 rounded-full">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+              LIVE
+              {viewerCount > 0 && <span className="text-red-400/70 font-normal">{viewerCount}</span>}
+            </span>
+          )}
           <span>Turn {debate.current_turn}/{debate.max_turns}</span>
           <span className="uppercase font-mono text-xs">{debate.format}</span>
         </div>
       </div>
 
       {/* Participants bar */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
-        <div className="rounded-lg border border-pro/30 bg-pro/5 p-3 text-center">
-          <span className="text-pro text-xs font-bold uppercase">Pro</span>
-          <p className="font-medium mt-1">{proParticipant?.agent_name ?? "—"}</p>
+      {isTeamDebate ? (
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          <div className="rounded-lg border border-pro/30 bg-pro/5 p-3">
+            <div className="text-pro text-xs font-bold uppercase text-center mb-2">Team A (Pro)</div>
+            <div className={`grid ${proParticipants.length >= 3 ? "grid-cols-3" : "grid-cols-2"} gap-2`}>
+              {proParticipants.map((p) => (
+                <div key={p.agent_id} className="text-center">
+                  <p className="font-medium text-sm truncate">{p.agent_name}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-lg border border-con/30 bg-con/5 p-3">
+            <div className="text-con text-xs font-bold uppercase text-center mb-2">Team B (Con)</div>
+            <div className={`grid ${conParticipants.length >= 3 ? "grid-cols-3" : "grid-cols-2"} gap-2`}>
+              {conParticipants.map((p) => (
+                <div key={p.agent_id} className="text-center">
+                  <p className="font-medium text-sm truncate">{p.agent_name}</p>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
-        <div className="rounded-lg border border-con/30 bg-con/5 p-3 text-center">
-          <span className="text-con text-xs font-bold uppercase">Con</span>
-          <p className="font-medium mt-1">{conParticipant?.agent_name ?? "—"}</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          <div className="rounded-lg border border-pro/30 bg-pro/5 p-3 text-center">
+            <span className="text-pro text-xs font-bold uppercase">Pro</span>
+            <p className="font-medium mt-1">{proParticipants[0]?.agent_name ?? "—"}</p>
+          </div>
+          <div className="rounded-lg border border-con/30 bg-con/5 p-3 text-center">
+            <span className="text-con text-xs font-bold uppercase">Con</span>
+            <p className="font-medium mt-1">{conParticipants[0]?.agent_name ?? "—"}</p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Start button */}
       {debate.status === "scheduled" && (
@@ -262,22 +365,22 @@ export default function DebateArenaPage() {
           if (isNew) {
             seenTurnIdsRef.current.add(turn.id);
           }
+          const participant = agentMap.get(turn.agent_id);
           return (
             <TurnCard
               key={turn.id}
               turn={turn}
               debateId={id}
-              agentName={
-                turn.agent_id === proParticipant?.agent_id
-                  ? proParticipant.agent_name
-                  : conParticipant?.agent_name ?? "Unknown"
-              }
-              side={
-                turn.agent_id === proParticipant?.agent_id ? "pro" : "con"
-              }
+              agentName={participant?.agent_name ?? "Unknown"}
+              side={participant?.side ?? "pro"}
+              teamId={participant?.team_id ?? null}
+              isTeamDebate={isTeamDebate}
               reactions={reactions[turn.id] ?? {}}
               onReacted={loadReactions}
               isNew={isNew}
+              factcheckResult={factcheckResults[turn.id] ?? null}
+              onFactcheck={handleFactcheck}
+              factcheckCooldown={factcheckCooldown}
             />
           );
         })}
@@ -287,6 +390,7 @@ export default function DebateArenaPage() {
           <CooldownTimer
             cooldownSeconds={(debate as any).turn_cooldown_seconds ?? 10}
             nextTurnNumber={debate.current_turn + 1}
+            serverCooldownSeconds={isLiveMode ? serverCooldown : undefined}
           />
         )}
 
@@ -503,19 +607,30 @@ function TurnCard({
   debateId,
   agentName,
   side,
+  teamId,
+  isTeamDebate,
   reactions,
   onReacted,
   isNew = false,
+  factcheckResult,
+  onFactcheck,
+  factcheckCooldown,
 }: {
   turn: Turn;
   debateId: string;
   agentName: string;
   side: "pro" | "con";
+  teamId: string | null;
+  isTeamDebate: boolean;
   reactions: Record<string, number>;
   onReacted: () => void;
   isNew?: boolean;
+  factcheckResult: FactcheckResult | null;
+  onFactcheck: (turnId: string) => void;
+  factcheckCooldown: number;
 }) {
   const [citationsCollapsed, setCitationsCollapsed] = useState(true);
+  const [requesting, setRequesting] = useState(false);
   const borderColor = side === "pro" ? "border-pro/40" : "border-con/40";
   const sideColor = side === "pro" ? "text-pro" : "text-con";
   const bgTint = side === "pro" ? "bg-pro/5" : "bg-con/5";
@@ -537,6 +652,9 @@ function TurnCard({
       <div className={`rounded-xl border ${borderColor} ${bgTint} p-5 animate-pulse`}>
         <div className="flex items-center gap-2 mb-2">
           <span className={`text-xs font-bold uppercase ${sideColor}`}>{side}</span>
+          {isTeamDebate && teamId && (
+            <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-card-border/30 text-muted">Team {teamId}</span>
+          )}
           <span className="text-sm text-muted">{agentName}</span>
           <span className="text-xs text-muted ml-auto">Turn {turn.turn_number}</span>
         </div>
@@ -551,6 +669,9 @@ function TurnCard({
     <div className={`rounded-xl border ${borderColor} ${bgTint} p-5 animate-turn-in`}>
       <div className="flex items-center gap-2 mb-3">
         <span className={`text-xs font-bold uppercase ${sideColor}`}>{side}</span>
+        {isTeamDebate && teamId && (
+          <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-card-border/30 text-muted">Team {teamId}</span>
+        )}
         <span className="text-sm text-muted">{agentName}</span>
         {turn.token_count != null && (
           <span className="text-xs text-muted font-mono">{turn.token_count} tok</span>
@@ -599,7 +720,7 @@ function TurnCard({
             </div>
           )}
 
-          {/* Reaction buttons */}
+          {/* Reaction buttons and factcheck */}
           <div className="flex items-center gap-3 mt-4 pt-3 border-t border-card-border/50">
             <button
               onClick={() => handleReaction("like")}
@@ -615,6 +736,24 @@ function TurnCard({
               <span>&#x26A0;</span>
               <span>{reactions.logic_error ?? 0}</span>
             </button>
+
+            <div className="ml-auto flex items-center gap-2">
+              {factcheckResult ? (
+                <FactcheckBadge result={factcheckResult} />
+              ) : turn.status === "validated" && (
+                <button
+                  onClick={async () => {
+                    setRequesting(true);
+                    onFactcheck(turn.id);
+                    setTimeout(() => setRequesting(false), 2000);
+                  }}
+                  disabled={requesting || Date.now() < factcheckCooldown}
+                  className="text-xs text-muted hover:text-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {requesting ? "Requesting..." : Date.now() < factcheckCooldown ? "Cooldown..." : "Fact Check"}
+                </button>
+              )}
+            </div>
           </div>
         </>
       )}

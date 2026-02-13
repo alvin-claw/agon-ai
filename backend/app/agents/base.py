@@ -20,6 +20,8 @@ class BaseDebateAgent(ABC):
         side: str,
         previous_turns: list[Turn],
         turn_number: int,
+        team_id: str | None = None,
+        max_turns: int | None = None,
     ) -> dict:
         """Generate a debate turn response.
 

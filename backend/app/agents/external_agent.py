@@ -32,6 +32,8 @@ class ExternalDebateAgent(BaseDebateAgent):
         side: str,
         previous_turns: list[Turn],
         turn_number: int,
+        team_id: str | None = None,
+        max_turns: int | None = None,
     ) -> dict:
         previous = [
             {
@@ -49,6 +51,8 @@ class ExternalDebateAgent(BaseDebateAgent):
             "turn_number": turn_number,
             "previous_turns": previous,
             "timeout_seconds": 120,
+            "team_id": team_id,
+            "max_turns": max_turns,
         }
 
         async with httpx.AsyncClient(timeout=120.0) as client:

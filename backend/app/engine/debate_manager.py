@@ -55,6 +55,7 @@ class DebateManager:
     async def _run_debate(self):
         """Internal debate loop."""
         from app.agents.base import get_agent
+        from app.engine.live_event_bus import event_bus
 
         async with self.db_factory() as db:
             debate = await self._load_debate(db)
@@ -62,6 +63,7 @@ class DebateManager:
                 logger.error(f"Debate {self.debate_id} not found")
                 return
 
+            is_live = debate.mode == "live"
             participants = sorted(debate.participants, key=lambda p: p.turn_order)
             logger.info(f"Starting debate '{debate.topic}' with {len(participants)} participants, {debate.max_turns} turns")
 
@@ -76,6 +78,7 @@ class DebateManager:
                     agent_id=participant.agent_id,
                     turn_number=turn_number,
                     status="pending",
+                    team_id=participant.team_id,
                 )
                 db.add(turn)
                 await db.commit()
@@ -97,6 +100,18 @@ class DebateManager:
                     .order_by(Turn.turn_number)
                 )
                 previous_turns = prev_turns.scalars().all()
+
+            # Publish turn_start event for live mode
+            if is_live:
+                await event_bus.publish(self.debate_id, {
+                    "type": "turn_start",
+                    "data": {
+                        "turn_number": turn_number,
+                        "agent_id": str(participant.agent_id),
+                        "side": participant.side,
+                        "team_id": participant.team_id,
+                    },
+                })
 
             # Check concurrent debate limit for external agents
             if not agent.is_builtin:
@@ -129,6 +144,8 @@ class DebateManager:
                         side=participant.side,
                         previous_turns=previous_turns,
                         turn_number=turn_number,
+                        team_id=participant.team_id,
+                        max_turns=debate.max_turns,
                     ),
                     timeout=debate.turn_timeout_seconds,
                 )
@@ -158,6 +175,21 @@ class DebateManager:
 
                 logger.info(f"Turn {turn_number}: {agent.name} ({participant.side}) - {turn_data.get('stance', 'unknown')}")
 
+                # Publish turn_complete event for live mode
+                if is_live:
+                    await event_bus.publish(self.debate_id, {
+                        "type": "turn_complete",
+                        "data": {
+                            "turn_number": turn_number,
+                            "agent_id": str(participant.agent_id),
+                            "side": participant.side,
+                            "team_id": participant.team_id,
+                            "stance": turn_data.get("stance"),
+                            "claim": turn_data.get("claim"),
+                            "argument": turn_data.get("argument"),
+                        },
+                    })
+
             except asyncio.TimeoutError:
                 async with self.db_factory() as db:
                     await self._timeout_turn(db, turn_id)
@@ -172,6 +204,14 @@ class DebateManager:
 
             # Cooldown between turns
             if turn_number < debate.max_turns:
+                if is_live:
+                    await event_bus.publish(self.debate_id, {
+                        "type": "cooldown_start",
+                        "data": {
+                            "seconds": debate.turn_cooldown_seconds,
+                            "next_turn": turn_number + 1,
+                        },
+                    })
                 await asyncio.sleep(debate.turn_cooldown_seconds)
 
         # Complete the debate
@@ -182,6 +222,12 @@ class DebateManager:
             debate.completed_at = datetime.now(timezone.utc)
             await db.commit()
             logger.info(f"Debate '{debate.topic}' completed")
+
+        if is_live:
+            await event_bus.publish(self.debate_id, {
+                "type": "debate_complete",
+                "data": {"debate_id": str(self.debate_id)},
+            })
 
     async def _load_debate(self, db: AsyncSession) -> Debate | None:
         result = await db.execute(

@@ -54,24 +54,43 @@ async def create_debate(
                 detail=f"Agent '{ag.name}' is not active (status: {ag.status}). Complete sandbox validation first.",
             )
 
-    # For 1v1, first agent is pro, second is con
+    # Create debate with format-aware defaults
     debate = Debate(
         topic=body.topic,
         format=body.format,
         max_turns=body.max_turns,
+        mode=body.mode,
     )
     db.add(debate)
     await db.flush()
 
-    sides = ["pro", "con"]
+    # Assign sides and team_id based on format
+    # For NvN: first half is pro (team A), second half is con (team B)
+    agent_count = len(agent_ids)
+    half = agent_count // 2
+    participants = []
     for i, agent_id in enumerate(agent_ids):
+        side = "pro" if i < half else "con"
+        team_id = "A" if i < half else "B"
         participant = DebateParticipant(
             debate_id=debate.id,
             agent_id=agent_id,
-            side=sides[i % 2],
+            side=side,
+            team_id=team_id if body.format != "1v1" else None,
             turn_order=i,
         )
         db.add(participant)
+        participants.append(participant)
+
+    # Set interleaved round-robin turn_order: pro1, con1, pro2, con2, ...
+    pro_participants = [p for p in participants if p.side == "pro"]
+    con_participants = [p for p in participants if p.side == "con"]
+    order = 0
+    for pro_p, con_p in zip(pro_participants, con_participants):
+        pro_p.turn_order = order
+        order += 1
+        con_p.turn_order = order
+        order += 1
 
     await db.commit()
 
@@ -143,6 +162,7 @@ def _debate_to_response(debate: Debate) -> DebateResponse:
             agent_id=p.agent_id,
             agent_name=agent.name if agent else "Unknown",
             side=p.side,
+            team_id=p.team_id,
             turn_order=p.turn_order,
         ))
     return DebateResponse(
@@ -150,8 +170,10 @@ def _debate_to_response(debate: Debate) -> DebateResponse:
         topic=debate.topic,
         status=debate.status,
         format=debate.format,
+        mode=debate.mode,
         max_turns=debate.max_turns,
         current_turn=debate.current_turn,
+        viewer_count=debate.viewer_count,
         participants=participants,
         created_at=debate.created_at,
         started_at=debate.started_at,

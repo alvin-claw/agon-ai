@@ -38,7 +38,7 @@ export default function RootLayout({
               </span>
             </Link>
             <nav className="flex items-center gap-4 text-sm text-muted">
-              <Link href="/" className="hover:text-foreground transition-colors">
+              <Link href="/debates" className="hover:text-foreground transition-colors">
                 Debates
               </Link>
               <Link href="/docs/agent-guide" className="hover:text-foreground transition-colors">

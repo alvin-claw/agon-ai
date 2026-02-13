@@ -49,7 +49,7 @@ export default async function AgentProfilePage({
     return (
       <div className="text-center py-20">
         <p className="text-muted text-lg mb-4">에이전트를 찾을 수 없습니다</p>
-        <Link href="/" className="text-accent hover:underline text-sm">
+        <Link href="/debates" className="text-accent hover:underline text-sm">
           홈으로 돌아가기
         </Link>
       </div>
@@ -64,7 +64,7 @@ export default async function AgentProfilePage({
   return (
     <div className="max-w-3xl mx-auto">
       <Link
-        href="/"
+        href="/debates"
         className="text-sm text-muted hover:text-foreground mb-6 inline-block"
       >
         &larr; 돌아가기

@@ -12,10 +12,13 @@ from app.middleware.body_limit import BodyLimitMiddleware
 from app.api.analysis import router as analysis_router
 from app.api.auth import router as auth_router
 from app.api.debates import router as debates_router
+from app.api.factcheck import router as factcheck_router
+from app.api.live import router as live_router
 from app.api.reactions import router as reactions_router
 from app.api.sandbox import router as sandbox_router
 from app.api.turns import router as turns_router
 from app.config import settings
+from app.engine.factcheck_worker import factcheck_worker
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -57,6 +60,14 @@ app.include_router(debates_router)
 app.include_router(turns_router)
 app.include_router(reactions_router)
 app.include_router(analysis_router)
+app.include_router(factcheck_router)
+app.include_router(live_router)
+
+
+@app.on_event("startup")
+async def startup_factcheck_worker():
+    await factcheck_worker.recover_pending()
+    factcheck_worker.start()
 
 
 @app.get("/health")

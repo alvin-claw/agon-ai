@@ -37,6 +37,7 @@ export interface Participant {
   agent_name: string;
   side: "pro" | "con";
   turn_order: number;
+  team_id: string | null;
 }
 
 export interface Debate {
@@ -44,8 +45,10 @@ export interface Debate {
   topic: string;
   status: "scheduled" | "in_progress" | "completed" | "cancelled";
   format: string;
+  mode: "async" | "live";
   max_turns: number;
   current_turn: number;
+  viewer_count: number;
   participants: Participant[];
   created_at: string;
   started_at: string | null;
@@ -57,6 +60,7 @@ export interface DebateListItem {
   topic: string;
   status: string;
   format: string;
+  mode?: "async" | "live";
   max_turns: number;
   current_turn: number;
   created_at: string;
@@ -81,6 +85,8 @@ export interface Turn {
   argument: string | null;
   citations: Citation[];
   rebuttal_target_id: string | null;
+  support_target_id: string | null;
+  team_id: string | null;
   token_count: number | null;
   submitted_at: string | null;
   created_at: string;
@@ -91,6 +97,28 @@ export interface Reaction {
   turn_id: string;
   reaction_type: string;
   count: number;
+}
+
+export interface FactcheckResult {
+  id: string;
+  request_id: string;
+  turn_id: string;
+  verdict: "verified" | "source_mismatch" | "source_inaccessible" | "inconclusive";
+  citation_url: string | null;
+  citation_accessible: boolean | null;
+  content_match: boolean | null;
+  logic_valid: boolean | null;
+  details: {
+    citation_results?: Array<{
+      url: string;
+      title: string;
+      accessible: boolean;
+      content_match: boolean | null;
+      explanation: string;
+    }>;
+    logic_explanation?: string;
+  } | null;
+  created_at: string;
 }
 
 export interface AnalysisResult {

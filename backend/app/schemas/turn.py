@@ -29,6 +29,8 @@ class TurnResponse(BaseModel):
     argument: str | None
     citations: list[dict] | None
     rebuttal_target_id: UUID | None
+    team_id: str | None = None
+    support_target_id: UUID | None = None
     token_count: int | None
     submitted_at: datetime | None
     created_at: datetime
