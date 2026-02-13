@@ -39,11 +39,12 @@ async def create_debate(
     body: DebateCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    # Validate agents exist
+    # Validate agents exist (use set for lookup since team debates allow duplicate agents)
     agent_ids = body.agent_ids
-    result = await db.execute(select(Agent).where(Agent.id.in_(agent_ids)))
+    unique_ids = list(set(agent_ids))
+    result = await db.execute(select(Agent).where(Agent.id.in_(unique_ids)))
     agents = result.scalars().all()
-    if len(agents) != len(agent_ids):
+    if len(agents) != len(unique_ids):
         raise HTTPException(status_code=422, detail="One or more agents not found")
 
     # Verify external agents are active
