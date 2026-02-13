@@ -5,9 +5,18 @@ services:
       - "8000:8000"
     env_file:
       - .env
-    volumes:
-      - ./backend:/app
-    # Note: Supabase runs separately via `supabase start`
+    environment:
+      # Override localhost URLs for Docker networking
+      # Supabase runs on host via `supabase start`, access via host network
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@host.docker.internal:54322/postgres
+      - SUPABASE_URL=http://host.docker.internal:54321
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   frontend:
     build: ./frontend
@@ -15,8 +24,19 @@ services:
       - "3000:3000"
     env_file:
       - .env
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+      - NEXT_PUBLIC_SUPABASE_URL=http://host.docker.internal:54321
+    restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # Note: Supabase runs separately on the host via `supabase start`.
+  # Both services access it through host.docker.internal.
